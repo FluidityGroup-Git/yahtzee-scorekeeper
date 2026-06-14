@@ -29,7 +29,18 @@ let last = null;
 let chosenVoice = null;
 let quietUntil = 0;          // don't talk over a celebration sound until this time
 let ai = null;               // optional AI line provider: { ready, prefetch, generate }
+let voicePlay = null;        // optional ElevenLabs player: (blob) -> Promise<bool>
 let supported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+// Decide how to deliver an AI item. Pure + exported for testing.
+//  - eleven    : has prefetched audio -> play the mp3 blob (tagged delivery)
+//  - webspeech : has a line but no audio -> speak the plain (tag-stripped) text
+//  - static    : no AI line -> caller speaks a static pool line
+export function pickDelivery(item) {
+  if (!item || !item.plain) return { mode: 'static' };
+  if (item.blob) return { mode: 'eleven', blob: item.blob, text: item.plain };
+  return { mode: 'webspeech', text: item.plain };
+}
 
 function shuffle(arr) {
   const a = [...arr];
@@ -70,14 +81,23 @@ async function fire() {
   if (!enabled || !supported) return;
   const wait = quietUntil - Date.now();
   if (wait > 0) { timer = setTimeout(fire, wait + 200); return; } // defer past a celebration
-  let line = null;
+  let item = null;
   if (ai && ai.ready()) {
-    // Race the AI line against a 2s budget; fall back to a static line if it's slow/fails.
-    try { line = await Promise.race([ai.generate(), new Promise(r => setTimeout(() => r(null), 2000))]); }
-    catch { line = null; }
+    // Race the AI item against a 2s budget; fall back to a static line if it's slow/fails.
+    try { item = await Promise.race([ai.generate(), new Promise(r => setTimeout(() => r(null), 2000))]); }
+    catch { item = null; }
   }
   if (!enabled) return; // muted while we awaited
-  utter(line || nextQuote());
+  // Fallback chain: ElevenLabs audio -> Web Speech (stripped line) -> static pool -> silent.
+  const d = pickDelivery(item);
+  if (d.mode === 'eleven' && voicePlay) {
+    const ok = await voicePlay(d.blob);
+    if (!ok) utter(d.text);          // EL playback failed -> Web Speech with the stripped line
+  } else if (d.mode === 'eleven' || d.mode === 'webspeech') {
+    utter(d.text);                   // AI line but no audio/player -> Web Speech
+  } else {
+    utter(nextQuote());              // no AI line -> static pool
+  }
   schedule(); // queue the next one
 }
 function clear() { if (timer) { clearTimeout(timer); timer = null; } }
@@ -93,8 +113,10 @@ export const Speech = {
   },
   setEnabled(on) { enabled = on; if (!on) { clear(); if (supported) speechSynthesis.cancel(); } },
   isEnabled() { return enabled; },
-  // Inject the optional AI line provider: { ready(), prefetch(), generate() -> Promise<string|null> }.
+  // Inject the optional AI line provider: { ready(), prefetch(), generate() -> Promise<item|null> }.
   setAI(provider) { ai = provider; },
+  // Inject the optional ElevenLabs player: (blob) -> Promise<bool>.
+  setVoicePlayer(fn) { voicePlay = fn; },
   // Call after every turn change. activeName = current active player's name; on = master sound on.
   onTurn(activeName, on) {
     if (on && enabled && supported && /^amber$/i.test((activeName || '').trim())) {

@@ -42,6 +42,11 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
 - [x] **AI pep talks (G, optional)** — bring-your-own Anthropic key in ⚙️ Settings generates Amber's
       lines live via `claude-haiku-4-5`; key stays in this device's `localStorage`, sent only to
       api.anthropic.com. Falls back seamlessly to the built-in lines with no key / offline / on error.
+- [x] **ElevenLabs voice + escalation (H, optional)** — expressive `eleven_v3` delivery as the primary
+      voice (Web Speech fallback), via a dev/preview `/api/tts` proxy that keeps `ELEVENLABS_API_KEY`
+      server-side. Commentary escalates L1→L5 (cheeky → savage) as the board fills, resetting each game;
+      Amber is always the hero, only Dan gets roasted, with hard guardrails. Configure voice id / model /
+      stability / style, a max-savagery cap, and profanity in ⚙️ Settings.
 - [ ] Phase 3 — Dexie persistence (autosave + resume, order log). **Not yet — refresh still resets.**
 - [ ] Phase 4 — New game / names, game-over finalize + save record.
 - [ ] Phase 5 — History screen.
@@ -50,3 +55,11 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
 
 Run `npm test` for the suite. To curate real audio, drop clips in `public/sounds/` (see the
 README there) — anything missing falls back to the built-in synth automatically.
+
+### ElevenLabs voice (optional)
+
+Copy `.env.example` to `.env` and set `ELEVENLABS_API_KEY` (gitignored, server-side only — the
+Vite `/api/tts` proxy reads it; it is never sent to the browser). Then in ⚙️ Settings: turn on
+**Use ElevenLabs**, paste a **Voice ID**, pick the model (`eleven_v3` recommended) and stability,
+and hit **Test voice**. The proxy runs in `npm run dev` and `npm run preview` only — on a plain
+static deploy there's no proxy, so it falls back to the device's Web Speech voice automatically.

@@ -5,7 +5,8 @@ import { deriveTurnState, canClaimBonus, isGameOver, decideWinner } from './game
 import { SoundEngine } from './sound.js';
 import { fireCelebration, celebrationToast, showToast } from './ui/celebrations.js';
 import { Speech } from './ui/speech.js';
-import { AIPep } from './ui/aiPep.js';
+import { AIPep, savageryLevel } from './ui/aiPep.js';
+import { Voice } from './ui/voice.js';
 
 // ---- dice glyph ----
 const FACES = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
@@ -321,7 +322,12 @@ document.getElementById('dataBtn').addEventListener('click', () => {
   scrim.classList.add('open');
 });
 
-// ---- AI pep talks (item G): live game context for Claude ----
+// ---- AI commentary (items G/H): live game context + escalation for Claude ----
+let maxSavagery = 5;   // 1..5 cap
+let profanityOn = false;
+try { maxSavagery = Math.max(1, Math.min(5, parseInt(localStorage.getItem('yz_savagery') || '5', 10) || 5)); } catch { /* ignore */ }
+try { profanityOn = localStorage.getItem('yz_profanity') === '1'; } catch { /* ignore */ }
+
 function aiContext() {
   const seat = [0, 1].find(p => /^amber$/i.test(nameOf(p).trim()));
   const me = seat == null ? 1 : seat;          // default to seat 1 if no "Amber"
@@ -337,23 +343,38 @@ function aiContext() {
     justYahtzee = lastE.category === 'yahtzee' && lastE.value === 50;
     justBonus = lastE.category === 'yahtzeeBonus' && lastE.value > 0;
   }
-  return { amber, dan, lead: amber - dan, boxesLeft: 13 - filledBaseCount(valuesP(me)), last, justScratched, justYahtzee, justBonus };
+  // progress resets each game (entries cleared on new game); drives the savagery ladder.
+  const progress = (filledBaseCount(valuesP(0)) + filledBaseCount(valuesP(1))) / 26;
+  return {
+    amber, dan, lead: amber - dan, boxesLeft: 13 - filledBaseCount(valuesP(me)),
+    last, justScratched, justYahtzee, justBonus,
+    level: savageryLevel(progress, maxSavagery), profanity: profanityOn,
+  };
 }
 AIPep.setContextProvider(aiContext);
+AIPep.setSynth({ ready: () => Voice.ready(), make: (t) => Voice.make(t) });
 Speech.setAI({ ready: () => AIPep.ready(), prefetch: () => AIPep.prefetch(), generate: () => AIPep.generateNow() });
+Speech.setVoicePlayer((blob) => Voice.play(blob));
+Voice.load();
 try { AIPep.setEnabled(localStorage.getItem('yz_ai_pep') === '1'); } catch { /* ignore */ }
 
 function setAi(on) { AIPep.setEnabled(on); try { localStorage.setItem('yz_ai_pep', on ? '1' : '0'); } catch { /* ignore */ } }
+
+function setMaxSavagery(n) { maxSavagery = Math.max(1, Math.min(5, n)); try { localStorage.setItem('yz_savagery', String(maxSavagery)); } catch { /* ignore */ } }
+function setProfanity(on) { profanityOn = on; try { localStorage.setItem('yz_profanity', on ? '1' : '0'); } catch { /* ignore */ } }
 
 function openSettings() {
   SoundEngine.warm(); Speech.warm();
   const masked = AIPep.maskedKey();
   const aiOn = AIPep.isEnabled();
+  const v = Voice.get();
+  const opt = (sel, val, label) => `<option value="${val}"${sel === val ? ' selected' : ''}>${label}</option>`;
   entry.innerHTML = `<div class="grab"></div>
-    <div class="ehead"><div><div class="etitle">Settings</div><div class="ewho" style="color:var(--ink-soft)">Pep talks & AI</div></div></div>
+    <div class="ehead"><div><div class="etitle">Settings</div><div class="ewho" style="color:var(--ink-soft)">Commentary &amp; voice</div></div></div>
+
     <div class="setrow"><span>Amber pep talks</span><button class="toggle ${pepOn ? 'on' : ''}" id="setPep">${pepOn ? 'On' : 'Off'}</button></div>
-    <div class="setrow"><span>AI pep talks (Claude)</span><button class="toggle ${aiOn ? 'on' : ''}" id="setAi">${aiOn ? 'On' : 'Off'}</button></div>
-    <p class="eodds" style="margin:10px 0 6px;">Add an Anthropic API key to generate warmer, situational lines live. The key stays on this device and is only ever sent to api.anthropic.com.</p>
+    <div class="setrow"><span>AI commentary (Claude)</span><button class="toggle ${aiOn ? 'on' : ''}" id="setAi">${aiOn ? 'On' : 'Off'}</button></div>
+    <p class="eodds" style="margin:10px 0 6px;">Anthropic API key — generates escalating, situational lines live. Stays on this device; sent only to api.anthropic.com.</p>
     <input class="keyinput" id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="${masked || 'sk-ant-…'}">
     <div class="fixedwrap" style="margin-top:8px;">
       <button class="bigbtn score" id="keySave">Save</button>
@@ -361,17 +382,38 @@ function openSettings() {
       <button class="bigbtn scratch" id="keyClear">Clear</button>
     </div>
     <div class="data-note" id="keyStatus" style="margin-top:10px;">${masked ? 'Key saved: ' + masked : 'No key — using the built-in pep talks.'}</div>
-    <p class="data-note" style="color:var(--ink-soft);">Uses <b>claude-haiku-4-5</b> (fast &amp; cheap — about a fraction of a cent per line). With no key, offline, or on any error it falls back to the built-in lines automatically.</p>`;
+
+    <div class="setrow" style="margin-top:6px;"><span>Max savagery</span>
+      <select class="selinput" id="setSav">${[1, 2, 3, 4, 5].map(n => opt(maxSavagery, n, 'L' + n)).join('')}</select></div>
+    <div class="setrow"><span>Allow profanity</span><button class="toggle ${profanityOn ? 'on' : ''}" id="setProf">${profanityOn ? 'On' : 'Off'}</button></div>
+    <p class="data-note" style="color:var(--ink-soft);margin-top:6px;">Burns escalate L1→L5 as the board fills (resets each game). Amber is always the hero; only Dan gets roasted. Hard guardrails apply at every level.</p>
+
+    <div class="seclabel" style="margin:16px 2px 6px;">ElevenLabs voice</div>
+    <div class="setrow"><span>Use ElevenLabs</span><button class="toggle ${v.on ? 'on' : ''}" id="setEl">${v.on ? 'On' : 'Off'}</button></div>
+    <input class="keyinput" id="elVoice" style="margin-top:8px;" autocomplete="off" spellcheck="false" placeholder="Voice ID" value="${v.voiceId}">
+    <div class="setrow" style="margin-top:8px;"><span>Model</span>
+      <select class="selinput" id="elModel">${opt(v.model, 'eleven_v3', 'v3 (expressive)') + opt(v.model, 'eleven_multilingual_v2', 'multilingual v2')}</select></div>
+    <div class="setrow"><span>Stability</span>
+      <select class="selinput" id="elStab">${opt(v.stability, 'creative', 'Creative') + opt(v.stability, 'natural', 'Natural') + opt(v.stability, 'robust', 'Robust')}</select></div>
+    <div class="setrow"><span>Style (0–1)</span>
+      <input class="selinput" id="elStyle" type="number" min="0" max="1" step="0.1" value="${v.style}"></div>
+    <div class="fixedwrap" style="margin-top:10px;">
+      <button class="bigbtn add" id="elTest">Test voice</button>
+    </div>
+    <div class="data-note" id="elStatus" style="margin-top:10px;">${v.voiceId ? 'Voice ID set.' : 'No voice ID yet.'}</div>
+    <p class="data-note" style="color:var(--ink-soft);">The ElevenLabs key is server-side: set <b>ELEVENLABS_API_KEY</b> in <b>.env</b> (not stored in the browser). Model <b>eleven_v3</b> performs the bracketed tags; with no key/offline it falls back to the device voice automatically.</p>`;
+
   const status = document.getElementById('keyStatus');
+  const elStatus = document.getElementById('elStatus');
   document.getElementById('setPep').onclick = () => { togglePep(); openSettings(); };
   document.getElementById('setAi').onclick = () => {
     if (!AIPep.hasKey()) { status.textContent = 'Add an API key first.'; return; }
     setAi(!AIPep.isEnabled()); openSettings();
   };
   document.getElementById('keySave').onclick = () => {
-    const v = document.getElementById('keyInput').value.trim();
-    if (!v) { status.textContent = 'Paste a key, then Save.'; return; }
-    AIPep.setKey(v); status.textContent = 'Key saved: ' + AIPep.maskedKey();
+    const val = document.getElementById('keyInput').value.trim();
+    if (!val) { status.textContent = 'Paste a key, then Save.'; return; }
+    AIPep.setKey(val); status.textContent = 'Key saved: ' + AIPep.maskedKey();
     document.getElementById('keyInput').value = '';
   };
   document.getElementById('keyClear').onclick = () => { AIPep.setKey(''); setAi(false); openSettings(); };
@@ -383,6 +425,23 @@ function openSettings() {
     status.textContent = r.ok ? '✓ ' + r.text : '✗ ' + r.error;
     if (r.ok && typed) { AIPep.setKey(typed); document.getElementById('keyInput').value = ''; }
   };
+
+  document.getElementById('setSav').onchange = (e) => setMaxSavagery(parseInt(e.target.value, 10));
+  document.getElementById('setProf').onclick = () => { setProfanity(!profanityOn); openSettings(); };
+
+  document.getElementById('setEl').onclick = () => { Voice.setEnabled(!Voice.isEnabled()); openSettings(); };
+  document.getElementById('elVoice').onchange = (e) => Voice.set({ voiceId: e.target.value.trim() });
+  document.getElementById('elModel').onchange = (e) => Voice.set({ model: e.target.value });
+  document.getElementById('elStab').onchange = (e) => Voice.set({ stability: e.target.value });
+  document.getElementById('elStyle').onchange = (e) => Voice.set({ style: parseFloat(e.target.value) || 0 });
+  document.getElementById('elTest').onclick = async () => {
+    Voice.set({ voiceId: document.getElementById('elVoice').value.trim() });
+    if (!Voice.get().voiceId) { elStatus.textContent = 'Enter a Voice ID first.'; return; }
+    elStatus.textContent = 'Testing voice…';
+    const r = await Voice.test();
+    elStatus.textContent = r.ok ? '✓ Played a sample.' : '✗ ' + r.error;
+  };
+
   scrim.classList.add('open');
 }
 

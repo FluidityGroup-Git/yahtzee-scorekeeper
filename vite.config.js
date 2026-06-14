@@ -9,6 +9,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'],
+      // generateSW precaches the local app shell only and adds no runtime caching, so
+      // cross-origin POSTs to api.anthropic.com (the AI pep talks) are never intercepted
+      // or cached by the service worker. Keep it that way — don't add runtimeCaching for it.
+      workbox: { navigateFallbackDenylist: [/^https:\/\/api\.anthropic\.com/] },
       manifest: {
         name: 'Yahtzee Scorekeeper',
         short_name: 'Yahtzee',

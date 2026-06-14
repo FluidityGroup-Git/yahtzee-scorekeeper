@@ -5,6 +5,7 @@ import { deriveTurnState, canClaimBonus, isGameOver, decideWinner } from './game
 import { SoundEngine } from './sound.js';
 import { fireCelebration, celebrationToast, showToast } from './ui/celebrations.js';
 import { Speech } from './ui/speech.js';
+import { AIPep } from './ui/aiPep.js';
 
 // ---- dice glyph ----
 const FACES = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
@@ -291,11 +292,15 @@ document.getElementById('soundBtn').addEventListener('click', function () {
   if (soundOn) { SoundEngine.warm(); SoundEngine.play('nice'); }
   Speech.onTurn(nameOf(turnState().activePlayer), soundOn);
 });
-document.getElementById('pepBtn').addEventListener('click', function () {
-  pepOn = !pepOn; Speech.setEnabled(pepOn); this.textContent = pepOn ? '💬' : '🔕'; this.classList.toggle('off', !pepOn);
-  this.title = pepOn ? 'Amber pep talks: on' : 'Amber pep talks: off';
+function togglePep(on = !pepOn) {
+  pepOn = on; Speech.setEnabled(pepOn);
+  const b = document.getElementById('pepBtn');
+  b.textContent = pepOn ? '💬' : '🔕'; b.classList.toggle('off', !pepOn);
+  b.title = pepOn ? 'Amber pep talks: on' : 'Amber pep talks: off';
   Speech.onTurn(nameOf(turnState().activePlayer), soundOn);
-});
+}
+document.getElementById('pepBtn').addEventListener('click', () => togglePep());
+document.getElementById('setBtn').addEventListener('click', openSettings);
 document.getElementById('newBtn').addEventListener('click', () => {
   if (game.entries.length > 0 && !confirm('Start a new game? Current scores clear.')) return;
   showSetup();
@@ -315,6 +320,71 @@ document.getElementById('dataBtn').addEventListener('click', () => {
     <div class="data-json">${JSON.stringify(rec, null, 2).replace(/</g, '&lt;')}</div>`;
   scrim.classList.add('open');
 });
+
+// ---- AI pep talks (item G): live game context for Claude ----
+function aiContext() {
+  const seat = [0, 1].find(p => /^amber$/i.test(nameOf(p).trim()));
+  const me = seat == null ? 1 : seat;          // default to seat 1 if no "Amber"
+  const them = me === 0 ? 1 : 0;
+  const amber = computeTotals(valuesP(me)).grand;
+  const dan = computeTotals(valuesP(them)).grand;
+  const mine = game.entries.filter(e => e.playerId === me).sort((a, b) => b.orderIndex - a.orderIndex);
+  const lastE = mine[0];
+  let last = null, justScratched = false, justYahtzee = false, justBonus = false;
+  if (lastE) {
+    last = { label: META[lastE.category]?.name || lastE.category, value: lastE.category === 'yahtzeeBonus' ? 100 : lastE.value };
+    justScratched = lastE.value === 0 && lastE.category !== 'yahtzeeBonus';
+    justYahtzee = lastE.category === 'yahtzee' && lastE.value === 50;
+    justBonus = lastE.category === 'yahtzeeBonus' && lastE.value > 0;
+  }
+  return { amber, dan, lead: amber - dan, boxesLeft: 13 - filledBaseCount(valuesP(me)), last, justScratched, justYahtzee, justBonus };
+}
+AIPep.setContextProvider(aiContext);
+Speech.setAI({ ready: () => AIPep.ready(), prefetch: () => AIPep.prefetch(), generate: () => AIPep.generateNow() });
+try { AIPep.setEnabled(localStorage.getItem('yz_ai_pep') === '1'); } catch { /* ignore */ }
+
+function setAi(on) { AIPep.setEnabled(on); try { localStorage.setItem('yz_ai_pep', on ? '1' : '0'); } catch { /* ignore */ } }
+
+function openSettings() {
+  SoundEngine.warm(); Speech.warm();
+  const masked = AIPep.maskedKey();
+  const aiOn = AIPep.isEnabled();
+  entry.innerHTML = `<div class="grab"></div>
+    <div class="ehead"><div><div class="etitle">Settings</div><div class="ewho" style="color:var(--ink-soft)">Pep talks & AI</div></div></div>
+    <div class="setrow"><span>Amber pep talks</span><button class="toggle ${pepOn ? 'on' : ''}" id="setPep">${pepOn ? 'On' : 'Off'}</button></div>
+    <div class="setrow"><span>AI pep talks (Claude)</span><button class="toggle ${aiOn ? 'on' : ''}" id="setAi">${aiOn ? 'On' : 'Off'}</button></div>
+    <p class="eodds" style="margin:10px 0 6px;">Add an Anthropic API key to generate warmer, situational lines live. The key stays on this device and is only ever sent to api.anthropic.com.</p>
+    <input class="keyinput" id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="${masked || 'sk-ant-…'}">
+    <div class="fixedwrap" style="margin-top:8px;">
+      <button class="bigbtn score" id="keySave">Save</button>
+      <button class="bigbtn add" id="keyTest">Test</button>
+      <button class="bigbtn scratch" id="keyClear">Clear</button>
+    </div>
+    <div class="data-note" id="keyStatus" style="margin-top:10px;">${masked ? 'Key saved: ' + masked : 'No key — using the built-in pep talks.'}</div>
+    <p class="data-note" style="color:var(--ink-soft);">Uses <b>claude-haiku-4-5</b> (fast &amp; cheap — about a fraction of a cent per line). With no key, offline, or on any error it falls back to the built-in lines automatically.</p>`;
+  const status = document.getElementById('keyStatus');
+  document.getElementById('setPep').onclick = () => { togglePep(); openSettings(); };
+  document.getElementById('setAi').onclick = () => {
+    if (!AIPep.hasKey()) { status.textContent = 'Add an API key first.'; return; }
+    setAi(!AIPep.isEnabled()); openSettings();
+  };
+  document.getElementById('keySave').onclick = () => {
+    const v = document.getElementById('keyInput').value.trim();
+    if (!v) { status.textContent = 'Paste a key, then Save.'; return; }
+    AIPep.setKey(v); status.textContent = 'Key saved: ' + AIPep.maskedKey();
+    document.getElementById('keyInput').value = '';
+  };
+  document.getElementById('keyClear').onclick = () => { AIPep.setKey(''); setAi(false); openSettings(); };
+  document.getElementById('keyTest').onclick = async () => {
+    const typed = document.getElementById('keyInput').value.trim();
+    if (!typed && !AIPep.hasKey()) { status.textContent = 'Enter a key to test.'; return; }
+    status.textContent = 'Testing…';
+    const r = await AIPep.test(typed || undefined);
+    status.textContent = r.ok ? '✓ ' + r.text : '✗ ' + r.error;
+    if (r.ok && typed) { AIPep.setKey(typed); document.getElementById('keyInput').value = ''; }
+  };
+  scrim.classList.add('open');
+}
 
 // Unlock audio + speech on the first user gesture.
 window.addEventListener('pointerdown', () => { SoundEngine.warm(); Speech.warm(); }, { once: true });

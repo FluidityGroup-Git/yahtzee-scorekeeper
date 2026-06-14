@@ -3,18 +3,19 @@
 // the instant control passes, the game ends, or sound/pep-talks are muted. Also used for the
 // one-off "EXTRA TURN!" announce on a bonus Yahtzee.
 
+// Static fallback pool — every line names Amber (used when AI pep talks are off/unavailable).
 const QUOTES = [
   'Amber. Greatness is a choice. Roll like you mean it.',
-  'The dice fear you, as they should.',
-  'You are the main character. Dan is set dressing.',
-  'Destiny is just probability with better marketing. Go get it.',
-  'Breathe. Center yourself. Crush him.',
-  'The universe is vast, indifferent, and currently rooting for you.',
-  "You miss one hundred percent of the Yahtzees you don't roll. Probably.",
-  'Fortune favors the bold, and the slightly smug.',
-  'Somewhere a statistician is weeping at your standard deviation. In a good way.',
-  "Win or lose, you're still better than Dan at this. Allegedly.",
-  'Channel your inner chaos. The dice respect chaos.',
+  'The dice fear you, Amber, as they should.',
+  'You are the main character, Amber. Dan is set dressing.',
+  'Amber, destiny is just probability with better marketing. Go get it.',
+  'Breathe, Amber. Center yourself. Crush him.',
+  'The universe is vast, indifferent, and currently rooting for you, Amber.',
+  "Amber, you miss one hundred percent of the Yahtzees you don't roll. Probably.",
+  'Fortune favors the bold, Amber, and the slightly smug.',
+  'Somewhere a statistician is weeping at your standard deviation, Amber. In a good way.',
+  "Win or lose, Amber, you're still better than Dan at this. Allegedly.",
+  'Channel your inner chaos, Amber. The dice respect chaos.',
   'One roll closer to immortality, Amber.',
 ];
 
@@ -27,6 +28,7 @@ let bag = [];
 let last = null;
 let chosenVoice = null;
 let quietUntil = 0;          // don't talk over a celebration sound until this time
+let ai = null;               // optional AI line provider: { ready, prefetch, generate }
 let supported = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
 function shuffle(arr) {
@@ -64,11 +66,18 @@ function schedule() {
   const delay = MIN_DELAY + Math.random() * (MAX_DELAY - MIN_DELAY);
   timer = setTimeout(fire, delay);
 }
-function fire() {
+async function fire() {
   if (!enabled || !supported) return;
   const wait = quietUntil - Date.now();
   if (wait > 0) { timer = setTimeout(fire, wait + 200); return; } // defer past a celebration
-  utter(nextQuote());
+  let line = null;
+  if (ai && ai.ready()) {
+    // Race the AI line against a 2s budget; fall back to a static line if it's slow/fails.
+    try { line = await Promise.race([ai.generate(), new Promise(r => setTimeout(() => r(null), 2000))]); }
+    catch { line = null; }
+  }
+  if (!enabled) return; // muted while we awaited
+  utter(line || nextQuote());
   schedule(); // queue the next one
 }
 function clear() { if (timer) { clearTimeout(timer); timer = null; } }
@@ -84,10 +93,14 @@ export const Speech = {
   },
   setEnabled(on) { enabled = on; if (!on) { clear(); if (supported) speechSynthesis.cancel(); } },
   isEnabled() { return enabled; },
+  // Inject the optional AI line provider: { ready(), prefetch(), generate() -> Promise<string|null> }.
+  setAI(provider) { ai = provider; },
   // Call after every turn change. activeName = current active player's name; on = master sound on.
   onTurn(activeName, on) {
-    if (on && enabled && supported && /^amber$/i.test((activeName || '').trim())) schedule();
-    else clear();
+    if (on && enabled && supported && /^amber$/i.test((activeName || '').trim())) {
+      if (ai && ai.ready()) ai.prefetch();   // warm a batch ahead so speaking has no latency
+      schedule();
+    } else clear();
   },
   // A bonus Yahtzee just fired a celebration sound — hold quotes briefly.
   noteCelebration(ms = 2200) { quietUntil = Date.now() + ms; },

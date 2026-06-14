@@ -39,6 +39,9 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
       Yahtzee=50, edit-doesn't-pass-turn, game-over + winner.
 - [x] **Juice A–E** — active-column highlight, who-goes-first (coin flip), canvas-confetti tiers +
       flavour toasts, file-based `SoundEngine` (synth fallback), Amber-only spoken pep talks.
+- [x] **AI pep talks (G, optional)** — bring-your-own Anthropic key in ⚙️ Settings generates Amber's
+      lines live via `claude-haiku-4-5`; key stays in this device's `localStorage`, sent only to
+      api.anthropic.com. Falls back seamlessly to the built-in lines with no key / offline / on error.
 - [ ] Phase 3 — Dexie persistence (autosave + resume, order log). **Not yet — refresh still resets.**
 - [ ] Phase 4 — New game / names, game-over finalize + save record.
 - [ ] Phase 5 — History screen.

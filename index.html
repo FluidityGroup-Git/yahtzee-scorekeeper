@@ -20,6 +20,7 @@
       </div>
       <div class="hbtns">
         <button class="hbtn icon" id="soundBtn" title="Sound">🔊</button>
+        <button class="hbtn icon" id="pepBtn" title="Amber pep talks: on">💬</button>
         <button class="hbtn" id="dataBtn">Data</button>
         <button class="hbtn" id="newBtn">New</button>
       </div>
@@ -27,13 +28,13 @@
     <div class="players" id="players">
       <div class="pcard active" data-p="0">
         <span class="turnflag">To score</span>
-        <div class="cap"><span class="pflag"></span><input class="pname" data-p="0" value="Player 1" maxlength="12"></div>
+        <div class="cap"><span class="pflag"></span><input class="pname" data-p="0" value="Dan" maxlength="12"></div>
         <div class="ptotal" id="tot0">0</div>
         <div class="pmeta" id="meta0">0 / 13 boxes</div>
       </div>
       <div class="pcard" data-p="1">
         <span class="turnflag">To score</span>
-        <div class="cap"><span class="pflag"></span><input class="pname" data-p="1" value="Player 2" maxlength="12"></div>
+        <div class="cap"><span class="pflag"></span><input class="pname" data-p="1" value="Amber" maxlength="12"></div>
         <div class="ptotal" id="tot1">0</div>
         <div class="pmeta" id="meta1">0 / 13 boxes</div>
       </div>
@@ -54,9 +55,9 @@
   </div>
 </div>
 
-<canvas id="confetti"></canvas>
 <div class="toast" id="toast"></div>
 <div class="scrim" id="scrim"><div class="entry" id="entry"></div></div>
+<div class="scrim setup" id="setupScrim"><div class="setupcard" id="setupCard"></div></div>
 
 <script type="module" src="/src/main.js"></script>
 </body>

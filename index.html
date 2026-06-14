@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#7C5CFC">
+<title>Yahtzee! — Scorekeeper</title>
+<!-- Phase 1: still loading fonts from the CDN; vendored locally in phase 7 (falls back to system-ui offline). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="device" id="device">
+  <header>
+    <div class="brand">
+      <div class="word">
+        <span class="dice"><span class="d"><b></b></span><span class="d"><b></b></span></span>
+        <span class="logo"><span>Y</span><span>A</span><span>H</span><span>T</span><span>Z</span><span>E</span><span>E</span><span>!</span></span>
+      </div>
+      <div class="hbtns">
+        <button class="hbtn icon" id="soundBtn" title="Sound">🔊</button>
+        <button class="hbtn" id="dataBtn">Data</button>
+        <button class="hbtn" id="newBtn">New</button>
+      </div>
+    </div>
+    <div class="players" id="players">
+      <div class="pcard active" data-p="0">
+        <span class="turnflag">To score</span>
+        <div class="cap"><span class="pflag"></span><input class="pname" data-p="0" value="Player 1" maxlength="12"></div>
+        <div class="ptotal" id="tot0">0</div>
+        <div class="pmeta" id="meta0">0 / 13 boxes</div>
+      </div>
+      <div class="pcard" data-p="1">
+        <span class="turnflag">To score</span>
+        <div class="cap"><span class="pflag"></span><input class="pname" data-p="1" value="Player 2" maxlength="12"></div>
+        <div class="ptotal" id="tot1">0</div>
+        <div class="pmeta" id="meta1">0 / 13 boxes</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="turnbar">
+    <div class="statusline turn p0" id="statusLine">🎲 <b>Player 1</b>'s turn — roll, then tap a box to score.</div>
+  </div>
+
+  <div class="sheet">
+    <div class="seclabel">Upper section</div>
+    <div class="grid" id="upperGrid"></div>
+    <div class="grid" id="upperCalc" style="margin-top:7px;"></div>
+    <div class="seclabel">Lower section</div>
+    <div class="grid" id="lowerGrid"></div>
+    <div class="grid" id="lowerCalc" style="margin-top:7px;"></div>
+  </div>
+</div>
+
+<canvas id="confetti"></canvas>
+<div class="toast" id="toast"></div>
+<div class="scrim" id="scrim"><div class="entry" id="entry"></div></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

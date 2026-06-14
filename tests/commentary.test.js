@@ -1,0 +1,82 @@
+// Commentary orchestrator: per-score trigger, both-player targeting, voice fallback chain,
+// and cancel-in-flight on rapid scores (never stack voices).
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Commentary } from '../src/ui/commentary.js';
+
+const ctx = (seat = 1) => ({ scorerSeat: seat, scorer: seat ? 'Amber' : 'Dan' });
+
+beforeEach(() => Commentary.configure(null));
+
+describe('trigger + targeting', () => {
+  it('does nothing when not ready (no key / muted)', async () => {
+    const generate = vi.fn();
+    Commentary.configure({ ready: () => false, generate, speak: vi.fn(), stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx());
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('fires for EITHER player (no Amber-only gating) and speaks via Web Speech when no voice', async () => {
+    const speak = vi.fn();
+    const cfg = { ready: () => true, generate: vi.fn(async () => ({ tagged: '[low] x', plain: 'x' })),
+      voiceReady: () => false, speak, stopVoice: vi.fn(), caption: vi.fn() };
+    Commentary.configure(cfg);
+    await Commentary.react(ctx(0)); // Dan
+    await Commentary.react(ctx(1)); // Amber
+    expect(cfg.generate).toHaveBeenCalledTimes(2);
+    expect(speak).toHaveBeenCalledTimes(2);
+    expect(speak).toHaveBeenLastCalledWith('x');
+  });
+});
+
+describe('voice fallback chain', () => {
+  it('ElevenLabs: synthesizes the TAGGED line and plays the blob (no Web Speech)', async () => {
+    const synth = vi.fn(async () => ({ size: 1 }));
+    const playAudio = vi.fn(async () => true);
+    const speak = vi.fn();
+    Commentary.configure({ ready: () => true, generate: async () => ({ tagged: '[gleeful] hi', plain: 'hi' }),
+      voiceReady: () => true, voiceUsesTags: () => true, synth, playAudio, speak, stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx());
+    expect(synth).toHaveBeenCalledWith('[gleeful] hi');
+    expect(playAudio).toHaveBeenCalled();
+    expect(speak).not.toHaveBeenCalled();
+  });
+
+  it('falls back to Web Speech (plain) when audio is not ready within the budget', async () => {
+    const speak = vi.fn();
+    Commentary.configure({ ready: () => true, generate: async () => ({ tagged: '[low] hi', plain: 'hi' }),
+      voiceReady: () => true, voiceUsesTags: () => true, synth: () => new Promise(() => {}), playAudio: vi.fn(),
+      speak, stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx(), { budgetMs: 20 });
+    expect(speak).toHaveBeenCalledWith('hi');
+  });
+
+  it('falls back to Web Speech when blob playback fails', async () => {
+    const speak = vi.fn();
+    Commentary.configure({ ready: () => true, generate: async () => ({ tagged: 't', plain: 'p' }),
+      voiceReady: () => true, voiceUsesTags: () => false, synth: async () => ({ size: 1 }), playAudio: async () => false,
+      speak, stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx());
+    expect(speak).toHaveBeenCalledWith('p');
+  });
+});
+
+describe('cancel-in-flight (never stack voices)', () => {
+  it('a newer score cancels the in-flight one; only the latest speaks', async () => {
+    const resolvers = [];
+    const speak = vi.fn();
+    const stopVoice = vi.fn();
+    Commentary.configure({ ready: () => true,
+      generate: vi.fn(() => new Promise(res => resolvers.push(res))),
+      voiceReady: () => false, speak, stopVoice, caption: vi.fn() });
+
+    const p1 = Commentary.react({ scorerSeat: 0 });   // in-flight
+    const p2 = Commentary.react({ scorerSeat: 1 });   // supersedes p1
+    resolvers[0]({ tagged: 'A', plain: 'A' });         // stale resolves first
+    resolvers[1]({ tagged: 'B', plain: 'B' });
+    await Promise.all([p1, p2]);
+
+    expect(speak).toHaveBeenCalledTimes(1);
+    expect(speak).toHaveBeenCalledWith('B');
+    expect(stopVoice).toHaveBeenCalled();              // current voice stopped on the new score
+  });
+});

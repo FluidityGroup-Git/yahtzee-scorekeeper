@@ -7,6 +7,8 @@ import { fireCelebration, celebrationToast, showToast } from './ui/celebrations.
 import { Speech } from './ui/speech.js';
 import { AIPep, savageryLevel } from './ui/aiPep.js';
 import { Voice } from './ui/voice.js';
+import { Commentary } from './ui/commentary.js';
+import { buildContext } from './game/commentaryContext.js';
 
 // ---- dice glyph ----
 const FACES = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
@@ -172,33 +174,34 @@ function updateStatus(st = turnState()) {
 
 // ---- recording ----
 function recordEntry(p, k, value) {
-  const beforeTotals = computeTotals(valuesP(p));
+  const leadBefore = computeTotals(valuesP(0)).grand - computeTotals(valuesP(1)).grand;
+  const beforeBonus = computeTotals(valuesP(p)).bonus;
   const prevActive = turnState().activePlayer;
+  const existing = k !== 'yahtzeeBonus' && game.entries.find(e => e.playerId === p && e.category === k);
+  // A NEW score (fires commentary): a fresh base fill/scratch, or a bonus +100. Edits don't fire.
+  const isNewScore = (k === 'yahtzeeBonus' && value > 0) || (k !== 'yahtzeeBonus' && !existing);
   if (k === 'yahtzeeBonus') {
     if (value > 0) game.entries.push({ playerId: p, category: k, value: 100, orderIndex: ++game.orderCounter, recordedAt: now() });
     else game.entries = game.entries.filter(e => !(e.playerId === p && e.category === 'yahtzeeBonus')); // reset
-  } else {
-    const ex = game.entries.find(e => e.playerId === p && e.category === k);
-    if (ex) { ex.value = value; ex.recordedAt = now(); }            // edit in place — keeps orderIndex
-    else game.entries.push({ playerId: p, category: k, value, orderIndex: ++game.orderCounter, recordedAt: now() });
-  }
-  const afterTotals = computeTotals(valuesP(p));
-  const crossedBonus = beforeTotals.bonus === 0 && afterTotals.bonus === 35;
+  } else if (existing) { existing.value = value; existing.recordedAt = now(); }  // edit in place — keeps orderIndex
+  else game.entries.push({ playerId: p, category: k, value, orderIndex: ++game.orderCounter, recordedAt: now() });
+
+  const crossedBonus = beforeBonus === 0 && computeTotals(valuesP(p)).bonus === 35;
   const isBonusTick = (k === 'yahtzeeBonus' && value > 0);
   refresh();
   celebrate(p, k, value, crossedBonus, isBonusTick);
   const newActive = turnState().activePlayer;
   const over = isGameOver(game.entries);
   if (!over && !isBonusTick && newActive !== prevActive) SoundEngine.play('turnpass');
-  Speech.onTurn(nameOf(newActive), soundOn);
+  // Commentary: the SFX above lands immediately and covers generation latency; the voice follows.
   if (over && game.status !== 'finished') onGameOver();
+  else if (isNewScore) fireCommentary(p, k, value, leadBefore);
 }
 
 function clearScore(p, k) {
   if (k === 'yahtzeeBonus') game.entries = game.entries.filter(e => !(e.playerId === p && e.category === 'yahtzeeBonus'));
   else game.entries = game.entries.filter(e => !(e.playerId === p && e.category === k));
   refresh();
-  Speech.onTurn(nameOf(turnState().activePlayer), soundOn);
 }
 
 const SLOT = { mega: 'bonus', legendary: 'yahtzee', epic: 'epic', great: 'great', nice: 'nice', bust: 'bust' };
@@ -208,17 +211,14 @@ function celebrate(p, k, value, crossedBonus, isBonusTick) {
   const cell = document.querySelector(`.cell[data-key="${k}"][data-p="${p}"]`);
   if (cell) { cell.classList.remove('pop', 'bust'); void cell.offsetWidth; cell.classList.add(tier === 'bust' ? 'bust' : 'pop'); }
   SoundEngine.play(SLOT[tier] || 'tick');
-  if (tier !== 'normal') Speech.noteCelebration();
   fireCelebration(tier);
   const ptsText = k === 'yahtzeeBonus' ? '+100' : (value === 0 ? '+0' : '+' + value);
   if (crossedBonus && tier === 'great') celebrationToast('great', '+' + value, 'UPPER BONUS! +35');
   else celebrationToast(tier, ptsText);
-  if (tier === 'mega') Speech.announce('Extra turn!');
 }
 
 function onGameOver() {
   game.status = 'finished';
-  Speech.stop();
   refresh();
   const w = decideWinner(game.entries);
   let msg;
@@ -227,6 +227,12 @@ function onGameOver() {
   showToast('🏆', 'GAME OVER', msg);
   fireCelebration('legendary');
   SoundEngine.play('yahtzee');
+  // Closing commentary: winner hype + loser roast (or roast both on a tie).
+  const level = savageryLevel(1, maxSavagery);
+  let goCtx;
+  if (w.result === 'tie') goCtx = { gameOver: true, tie: true, winScore: w.totals[0].grand, level, profanity: profanityOn, scorerSeat: 0 };
+  else { const wp = w.result === 'p0' ? 0 : 1; goCtx = { gameOver: true, winner: nameOf(wp), loser: nameOf(1 - wp), winScore: w.totals[wp].grand, loseScore: w.totals[1 - wp].grand, level, profanity: profanityOn, scorerSeat: wp }; }
+  Commentary.react(goCtx);
 }
 
 // ---- bottom-sheet entry ----
@@ -327,9 +333,9 @@ function startGame(seat) {
   setName(0, s0.value); setName(1, s1.value);
   game.startingSeat = seat; game.entries = []; game.orderCounter = 0; game.status = 'active';
   prevLeadSeat = null;
+  Commentary.cancel();
   setupScrim.classList.remove('open');
   refresh();
-  Speech.onTurn(nameOf(seat), soundOn);
 }
 function setName(p, v) {
   const val = (v || '').trim() || ('Player ' + (p + 1));
@@ -343,14 +349,14 @@ document.querySelectorAll('.pname').forEach(inp => inp.addEventListener('input',
 document.getElementById('soundBtn').addEventListener('click', function () {
   soundOn = !soundOn; SoundEngine.setEnabled(soundOn); this.textContent = soundOn ? '🔊' : '🔇';
   if (soundOn) { SoundEngine.warm(); SoundEngine.play('nice'); }
-  Speech.onTurn(nameOf(turnState().activePlayer), soundOn);
+  else Commentary.cancel();
 });
 function togglePep(on = !pepOn) {
   pepOn = on; Speech.setEnabled(pepOn);
   const b = document.getElementById('pepBtn');
   b.textContent = pepOn ? '💬' : '🔕'; b.classList.toggle('off', !pepOn);
-  b.title = pepOn ? 'Amber pep talks: on' : 'Amber pep talks: off';
-  Speech.onTurn(nameOf(turnState().activePlayer), soundOn);
+  b.title = pepOn ? 'Commentary voice: on' : 'Commentary voice: off';
+  if (!pepOn) Commentary.cancel();
 }
 document.getElementById('pepBtn').addEventListener('click', () => togglePep());
 document.getElementById('setBtn').addEventListener('click', openSettings);
@@ -374,41 +380,46 @@ document.getElementById('dataBtn').addEventListener('click', () => {
   scrim.classList.add('open');
 });
 
-// ---- AI commentary (items G/H): live game context + escalation for Claude ----
+// ---- live commentary (reacts to every score, roasts both players) ----
 let maxSavagery = 5;   // 1..5 cap
 let profanityOn = false;
 try { maxSavagery = Math.max(1, Math.min(5, parseInt(localStorage.getItem('yz_savagery') || '5', 10) || 5)); } catch { /* ignore */ }
 try { profanityOn = localStorage.getItem('yz_profanity') === '1'; } catch { /* ignore */ }
-
-function aiContext() {
-  const seat = [0, 1].find(p => /^amber$/i.test(nameOf(p).trim()));
-  const me = seat == null ? 1 : seat;          // default to seat 1 if no "Amber"
-  const them = me === 0 ? 1 : 0;
-  const amber = computeTotals(valuesP(me)).grand;
-  const dan = computeTotals(valuesP(them)).grand;
-  const mine = game.entries.filter(e => e.playerId === me).sort((a, b) => b.orderIndex - a.orderIndex);
-  const lastE = mine[0];
-  let last = null, justScratched = false, justYahtzee = false, justBonus = false;
-  if (lastE) {
-    last = { label: META[lastE.category]?.name || lastE.category, value: lastE.category === 'yahtzeeBonus' ? 100 : lastE.value };
-    justScratched = lastE.value === 0 && lastE.category !== 'yahtzeeBonus';
-    justYahtzee = lastE.category === 'yahtzee' && lastE.value === 50;
-    justBonus = lastE.category === 'yahtzeeBonus' && lastE.value > 0;
-  }
-  // progress resets each game (entries cleared on new game); drives the savagery ladder.
-  const progress = (filledBaseCount(valuesP(0)) + filledBaseCount(valuesP(1))) / 26;
-  return {
-    amber, dan, lead: amber - dan, boxesLeft: 13 - filledBaseCount(valuesP(me)),
-    last, justScratched, justYahtzee, justBonus,
-    level: savageryLevel(progress, maxSavagery), profanity: profanityOn,
-  };
-}
-AIPep.setContextProvider(aiContext);
-AIPep.setSynth({ ready: () => Voice.ready(), make: (t) => Voice.make(t) });
-Speech.setAI({ ready: () => AIPep.ready(), prefetch: () => AIPep.prefetch(), generate: () => AIPep.generateNow() });
-Speech.setVoicePlayer((blob) => Voice.play(blob));
 Voice.load();
 try { AIPep.setEnabled(localStorage.getItem('yz_ai_pep') === '1'); } catch { /* ignore */ }
+
+const captionEl = document.getElementById('caption');
+let captionTimer = null;
+function showCaption(text, seat) {
+  if (!captionEl) return;
+  captionEl.textContent = text;
+  captionEl.className = 'caption show' + (seat === 0 || seat === 1 ? ' p' + seat : '');
+  clearTimeout(captionTimer);
+  captionTimer = setTimeout(() => captionEl.classList.remove('show'), 7000);
+}
+
+Commentary.configure({
+  ready: () => soundOn && pepOn && AIPep.ready(),     // gated by mute + 💬 + a Claude key
+  generate: (ctx, opts) => AIPep.generateLine(ctx, opts),
+  voiceReady: () => Voice.ready(),
+  voiceUsesTags: () => Voice.usesTags(),
+  synth: (t) => Voice.make(t),
+  playAudio: (b) => Voice.play(b),
+  stopVoice: () => { Voice.stop(); Speech.stop(); },
+  speak: (t) => Speech.say(t),
+  caption: (t, seat) => showCaption(t, seat),
+});
+
+// Fire a commentary line for a new score by either player.
+function fireCommentary(scorerSeat, category, value, leadBefore) {
+  const progress = (filledBaseCount(valuesP(0)) + filledBaseCount(valuesP(1))) / 26;
+  const ctx = buildContext({
+    entries: game.entries, scorerSeat, names: [nameOf(0), nameOf(1)],
+    lastCategory: category, lastValue: category === 'yahtzeeBonus' ? 100 : value,
+    leadBefore, level: savageryLevel(progress, maxSavagery), profanity: profanityOn,
+  });
+  Commentary.react(ctx);
+}
 
 function setAi(on) { AIPep.setEnabled(on); try { localStorage.setItem('yz_ai_pep', on ? '1' : '0'); } catch { /* ignore */ } }
 
@@ -424,27 +435,27 @@ function openSettings() {
   entry.innerHTML = `<div class="grab"></div>
     <div class="ehead"><div><div class="etitle">Settings</div><div class="ewho" style="color:var(--ink-soft)">Commentary &amp; voice</div></div></div>
 
-    <div class="setrow"><span>Amber pep talks</span><button class="toggle ${pepOn ? 'on' : ''}" id="setPep">${pepOn ? 'On' : 'Off'}</button></div>
+    <div class="setrow"><span>Commentary voice</span><button class="toggle ${pepOn ? 'on' : ''}" id="setPep">${pepOn ? 'On' : 'Off'}</button></div>
     <div class="setrow"><span>AI commentary (Claude)</span><button class="toggle ${aiOn ? 'on' : ''}" id="setAi">${aiOn ? 'On' : 'Off'}</button></div>
-    <p class="eodds" style="margin:10px 0 6px;">Anthropic API key — generates escalating, situational lines live. Stays on this device; sent only to api.anthropic.com.</p>
+    <p class="eodds" style="margin:10px 0 6px;">Anthropic API key — reacts to every score and roasts both players. Stays on this device; sent only to api.anthropic.com.</p>
     <input class="keyinput" id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="${masked || 'sk-ant-…'}">
     <div class="fixedwrap" style="margin-top:8px;">
       <button class="bigbtn score" id="keySave">Save</button>
       <button class="bigbtn add" id="keyTest">Test</button>
       <button class="bigbtn scratch" id="keyClear">Clear</button>
     </div>
-    <div class="data-note" id="keyStatus" style="margin-top:10px;">${masked ? 'Key saved: ' + masked : 'No key — using the built-in pep talks.'}</div>
+    <div class="data-note" id="keyStatus" style="margin-top:10px;">${masked ? 'Key saved: ' + masked : 'No key — commentary stays quiet without one.'}</div>
 
     <div class="setrow" style="margin-top:6px;"><span>Max savagery</span>
       <select class="selinput" id="setSav">${[1, 2, 3, 4, 5].map(n => opt(maxSavagery, n, 'L' + n)).join('')}</select></div>
     <div class="setrow"><span>Allow profanity</span><button class="toggle ${profanityOn ? 'on' : ''}" id="setProf">${profanityOn ? 'On' : 'Off'}</button></div>
-    <p class="data-note" style="color:var(--ink-soft);margin-top:6px;">Burns escalate L1→L5 as the board fills (resets each game). Amber is always the hero; only Dan gets roasted. Hard guardrails apply at every level.</p>
+    <p class="data-note" style="color:var(--ink-soft);margin-top:6px;">Burns escalate L1→L5 as the board fills (resets each game) and roast BOTH players. Hard guardrails apply at every level.</p>
 
     <div class="seclabel" style="margin:16px 2px 6px;">ElevenLabs voice</div>
     <div class="setrow"><span>Use ElevenLabs</span><button class="toggle ${v.on ? 'on' : ''}" id="setEl">${v.on ? 'On' : 'Off'}</button></div>
     <input class="keyinput" id="elVoice" style="margin-top:8px;" autocomplete="off" spellcheck="false" placeholder="Voice ID" value="${v.voiceId}">
     <div class="setrow" style="margin-top:8px;"><span>Model</span>
-      <select class="selinput" id="elModel">${opt(v.model, 'eleven_v3', 'v3 (expressive)') + opt(v.model, 'eleven_multilingual_v2', 'multilingual v2')}</select></div>
+      <select class="selinput" id="elModel">${opt(v.model, 'eleven_v3', 'v3 (expressive)') + opt(v.model, 'eleven_flash_v2_5', 'Flash v2.5 (fast)') + opt(v.model, 'eleven_multilingual_v2', 'multilingual v2')}</select></div>
     <div class="setrow"><span>Stability</span>
       <select class="selinput" id="elStab">${opt(v.stability, 'creative', 'Creative') + opt(v.stability, 'natural', 'Natural') + opt(v.stability, 'robust', 'Robust')}</select></div>
     <div class="setrow"><span>Style (0–1)</span>
@@ -453,7 +464,7 @@ function openSettings() {
       <button class="bigbtn add" id="elTest">Test voice</button>
     </div>
     <div class="data-note" id="elStatus" style="margin-top:10px;">${v.voiceId ? 'Voice ID set.' : 'No voice ID yet.'}</div>
-    <p class="data-note" style="color:var(--ink-soft);">The ElevenLabs key is server-side: set <b>ELEVENLABS_API_KEY</b> in <b>.env</b> (not stored in the browser). Model <b>eleven_v3</b> performs the bracketed tags; with no key/offline it falls back to the device voice automatically.</p>`;
+    <p class="data-note" style="color:var(--ink-soft);">The ElevenLabs key is server-side: set <b>ELEVENLABS_API_KEY</b> in <b>.env</b> (not stored in the browser). <b>v3</b> performs the bracketed tags (most expressive); <b>Flash v2.5</b> is faster but ignores tags. With no key/offline it falls back to the device voice automatically.</p>`;
 
   const status = document.getElementById('keyStatus');
   const elStatus = document.getElementById('elStatus');

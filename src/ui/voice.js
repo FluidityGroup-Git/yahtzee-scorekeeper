@@ -7,6 +7,7 @@ const LS = { on: 'yz_el_on', voice: 'yz_el_voice', model: 'yz_el_model', stabili
 const STABILITY = { creative: 0.0, natural: 0.5, robust: 1.0 };
 
 let cfg = { on: false, voiceId: '', model: 'eleven_v3', stability: 'natural', style: 0 };
+let currentAudio = null;
 
 function load() {
   try {
@@ -38,6 +39,8 @@ export const Voice = {
   setEnabled(on) { cfg.on = on; save(); },
   // Client-side readiness — the server still decides whether a key exists (make() may 503).
   ready() { return cfg.on && !!cfg.voiceId; },
+  // Only v3 performs bracketed audio tags; Flash/v2 would read them literally, so send plain text.
+  usesTags() { return cfg.model === 'eleven_v3'; },
 
   // Synthesize a (possibly tagged) line via the proxy. Returns an mp3 Blob or throws.
   async make(text) {
@@ -56,15 +59,19 @@ export const Voice = {
   },
 
   // Play an mp3 Blob. Returns true if playback started, false otherwise (caller falls back).
+  // Stops any currently-playing clip first so commentary voices never overlap.
   async play(blob) {
     try {
+      this.stop();
       const url = URL.createObjectURL(blob);
       const a = new Audio(url);
-      a.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true });
+      currentAudio = a;
+      a.addEventListener('ended', () => { URL.revokeObjectURL(url); if (currentAudio === a) currentAudio = null; }, { once: true });
       await a.play();
       return true;
     } catch { return false; }
   },
+  stop() { if (currentAudio) { try { currentAudio.pause(); } catch { /* ignore */ } currentAudio = null; } },
 
   // Settings "Test voice" button.
   async test(sample = '[gleeful] Amber, the dice tremble before you. [dryly] Dan, less so.') {

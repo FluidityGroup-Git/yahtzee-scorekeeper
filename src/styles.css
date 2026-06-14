@@ -92,6 +92,11 @@ header{background:var(--grape);border-bottom:3px solid var(--ink);padding:8px 14
 .statusline b{font-weight:700;}
 .statusline.makeup{background:var(--yellow);color:var(--ink);}
 .statusline.win{background:var(--mint);color:#0a3b2e;}
+/* live commentary caption (synced to the voice) */
+.caption{font-family:"Space Mono",monospace;font-size:13px;font-weight:700;text-align:center;line-height:1.3;
+  max-height:0;opacity:0;overflow:hidden;transition:opacity .25s ease, max-height .25s ease, margin-top .25s ease;}
+.caption.show{max-height:64px;opacity:1;margin-top:7px;}
+.caption.p0{color:var(--p1);} .caption.p1{color:var(--p2);}
 
 /* board: two blocks side by side */
 .board{flex:1;display:flex;gap:14px;padding:2px 14px 14px;min-height:0;overflow:hidden;}
@@ -252,5 +257,5 @@ header{background:var(--grape);border-bottom:3px solid var(--ink);padding:8px 14
   #confetti{display:none;}
   .streamer{display:none;}
   .coin.flip{animation:none;}
-  body,.screen-tint,.ppanel,.gapfill{transition:none;}
+  body,.screen-tint,.ppanel,.gapfill,.caption{transition:none;}
 }

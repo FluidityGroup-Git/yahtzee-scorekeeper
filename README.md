@@ -44,9 +44,14 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
       api.anthropic.com. Falls back seamlessly to the built-in lines with no key / offline / on error.
 - [x] **ElevenLabs voice + escalation (H, optional)** — expressive `eleven_v3` delivery as the primary
       voice (Web Speech fallback), via a dev/preview `/api/tts` proxy that keeps `ELEVENLABS_API_KEY`
-      server-side. Commentary escalates L1→L5 (cheeky → savage) as the board fills, resetting each game;
-      Amber is always the hero, only Dan gets roasted, with hard guardrails. Configure voice id / model /
-      stability / style, a max-savagery cap, and profanity in ⚙️ Settings.
+      server-side. Configure voice id / model (`eleven_v3` / `Flash v2.5` / multilingual v2) / stability /
+      style, a max-savagery cap, and profanity in ⚙️ Settings.
+- [x] **Commentary overhaul (Build 2)** — a line fires on **every new score** by either player (the SFX
+      covers the latency, the voice lands right after) and is **captioned on-screen**; edits don't fire,
+      and a newer score **cancels the in-flight one** so voices never stack. Roasts **both** Dan and Amber
+      with comeback detection, "what they need to win", and jab fodder (weak uppers, untouched Chance,
+      brutal scratches). Fallback chain: ElevenLabs (tagged, ~3.5s budget) → Web Speech (plain) → skip.
+      A special closing line fires on game over (winner hype + loser roast).
 - [ ] Phase 3 — Dexie persistence (autosave + resume, order log). **Not yet — refresh still resets.**
 - [ ] Phase 4 — New game / names, game-over finalize + save record.
 - [ ] Phase 5 — History screen.

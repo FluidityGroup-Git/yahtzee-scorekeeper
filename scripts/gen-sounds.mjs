@@ -14,18 +14,19 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'public', 'sounds');
 const ENDPOINT = 'https://api.elevenlabs.io/v1/sound-generation';
 const MODEL = 'eleven_text_to_sound_v2';
-const PROMPT_INFLUENCE = 0.7;   // 0.6–0.8 = fairly literal UI cues
+const DEFAULT_INFLUENCE = 0.7;
 
-// Cohesive retro game-night / chiptune vibe. duration_seconds is clamped to the API's 0.5–30 range.
+// Cohesive retro game-night / chiptune vibe. Per-slot prompt_influence (higher = more literal UI
+// cue, lower = more musical). duration_seconds is clamped to the API's 0.5–30 range.
 const SLOTS = [
-  { slot: 'tick',     duration: 0.3, text: 'short soft retro arcade UI blip, single button press, 8-bit' },
-  { slot: 'nice',     duration: 0.6, text: 'cheerful retro arcade coin pickup ding, 8-bit, short' },
-  { slot: 'great',    duration: 1.0, text: 'upbeat 8-bit power-up chime, ascending, celebratory' },
-  { slot: 'epic',     duration: 1.5, text: 'triumphant retro arcade fanfare, chiptune brass, exciting' },
-  { slot: 'yahtzee',  duration: 2.0, text: 'epic chiptune victory fanfare, jackpot win, big celebration' },
-  { slot: 'bonus',    duration: 2.5, text: 'over-the-top slot-machine jackpot, coins cascading, chiptune explosion' },
-  { slot: 'bust',     duration: 1.5, text: 'comedic sad trombone, womp womp, deadpan descending failure' },
-  { slot: 'turnpass', duration: 0.4, text: 'quick playful whoosh, light page-turn swish' },
+  { slot: 'tick',     duration: 0.3, influence: 0.85, text: 'short tight 8-bit UI blip, single crisp button press, dry, no reverb' },
+  { slot: 'nice',     duration: 0.6, influence: 0.8,  text: 'bright 8-bit coin pickup ding, two quick ascending blips, cheerful' },
+  { slot: 'great',    duration: 1.1, influence: 0.7,  text: 'upbeat chiptune power-up, fast ascending arpeggio, celebratory sparkle' },
+  { slot: 'epic',     duration: 1.6, influence: 0.65, text: 'triumphant retro arcade fanfare, punchy chiptune brass stabs, exciting' },
+  { slot: 'yahtzee',  duration: 2.2, influence: 0.6,  text: 'epic 8-bit victory fanfare, jackpot win, rising chiptune brass and bells, huge celebration' },
+  { slot: 'bonus',    duration: 2.6, influence: 0.6,  text: 'over-the-top slot-machine jackpot, cascading coins, chiptune explosion, crowd cheer' },
+  { slot: 'bust',     duration: 1.6, influence: 0.8,  text: 'comedic sad trombone, classic womp-womp-womp, deadpan descending brass failure' },
+  { slot: 'turnpass', duration: 0.45, influence: 0.85, text: 'quick playful swish whoosh, light page-turn, short and snappy' },
 ];
 
 // Minimal .env reader (no dotenv dependency); process.env wins if set.
@@ -56,11 +57,12 @@ for (const s of SLOTS) {
   const file = join(OUT, `${s.slot}.mp3`);
   if (existsSync(file) && !force) { console.log(`• skip ${s.slot} (exists — use --force to regenerate)`); skipped++; continue; }
   const duration = Math.max(0.5, Math.min(30, s.duration));   // API range
+  const influence = s.influence ?? DEFAULT_INFLUENCE;
   try {
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'xi-api-key': KEY, 'content-type': 'application/json' },
-      body: JSON.stringify({ text: s.text, duration_seconds: duration, prompt_influence: PROMPT_INFLUENCE, model_id: MODEL }),
+      body: JSON.stringify({ text: s.text, duration_seconds: duration, prompt_influence: influence, model_id: MODEL }),
     });
     if (!res.ok) { const t = await res.text().catch(() => ''); console.error(`✗ ${s.slot} — HTTP ${res.status} ${t.slice(0, 160)}`); failed++; continue; }
     writeFileSync(file, Buffer.from(await res.arrayBuffer()));

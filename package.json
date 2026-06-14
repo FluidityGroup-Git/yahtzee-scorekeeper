@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "icons": "node scripts/gen-icons.mjs"
+    "icons": "node scripts/gen-icons.mjs",
+    "gen-sounds": "node scripts/gen-sounds.mjs"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",

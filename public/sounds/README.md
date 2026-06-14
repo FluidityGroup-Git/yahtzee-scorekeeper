@@ -1,9 +1,13 @@
-# Curated sound clips (optional — synth fallback covers anything missing)
+# Sound clips (synth fallback covers anything missing)
 
-Drop royalty-free `.mp3` files here with these exact names. `src/sound.js` loads each on the
-first tap; any slot without a file automatically falls back to the built-in Web Audio synth,
-so the app always has sound even before these exist. Files placed here are precached by the
-service worker for offline use.
+Two ways to fill these slots — `.mp3` files with these exact names. `src/sound.js` loads each on
+the first tap; any slot without a file automatically falls back to the built-in Web Audio synth,
+so the app always has sound even before these exist. Files here are precached by the service
+worker for offline use.
+
+**Generate them with ElevenLabs (recommended):** set `ELEVENLABS_API_KEY` in `.env`, then
+`npm run gen-sounds` (regenerate all with `-- --force`, or a subset with `-- bust yahtzee`).
+This is a one-time build step — the API is never called at play time.
 
 | File          | Slot       | When it plays                                  | Vibe |
 |---------------|------------|-----------------------------------------------|------|

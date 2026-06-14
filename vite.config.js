@@ -19,7 +19,12 @@ export default defineConfig(({ mode }) => {
         // cross-origin Anthropic call and the same-origin /api/tts proxy (which streams the
         // ElevenLabs mp3) are never intercepted or cached. The denylist makes that explicit.
         // Don't add runtimeCaching for either.
-        workbox: { navigateFallbackDenylist: [/^\/api\//, /^https:\/\/api\.anthropic\.com/, /^https:\/\/api\.elevenlabs\.io/] },
+        workbox: {
+          // Default globs exclude mp3 — add it so the generated public/sounds/*.mp3 SFX are
+          // precached for offline use.
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff,woff2,mp3}'],
+          navigateFallbackDenylist: [/^\/api\//, /^https:\/\/api\.anthropic\.com/, /^https:\/\/api\.elevenlabs\.io/],
+        },
         manifest: {
           name: 'Yahtzee Scorekeeper',
           short_name: 'Yahtzee',

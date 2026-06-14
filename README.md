@@ -34,13 +34,16 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
 ## Status — phased build (see spec §11)
 
 - [x] **Phase 1** — Scaffold (Vite + vite-plugin-pwa) and port the v3 mockup UI with in-memory state.
-- [ ] Phase 2 — Extract pure `scoring.js` + `rules.js`, Vitest tests, wire UI to them.
-- [ ] Phase 3 — Dexie persistence (autosave + resume, order log).
-- [ ] Phase 4 — New game / names, game-over + winner, finalize + save.
+- [x] **Phase 2** — Pure `categories`/`scoring`/`rules`, Vitest + jsdom tests (24), UI wired to them.
+      Corrected house rules: derived turn state, per-player `makeupOwed` counter, +100 gated on
+      Yahtzee=50, edit-doesn't-pass-turn, game-over + winner.
+- [x] **Juice A–E** — active-column highlight, who-goes-first (coin flip), canvas-confetti tiers +
+      flavour toasts, file-based `SoundEngine` (synth fallback), Amber-only spoken pep talks.
+- [ ] Phase 3 — Dexie persistence (autosave + resume, order log). **Not yet — refresh still resets.**
+- [ ] Phase 4 — New game / names, game-over finalize + save record.
 - [ ] Phase 5 — History screen.
-- [ ] Phase 6 — Stats screen.
-- [ ] Phase 7 — Polish: vendored fonts, SoundEngine module, accessibility, JSON export, offline verify.
+- [ ] Phase 6 / item F — Stats screen (Chart.js): donut, bars, lines, histogram, fun counters.
+- [ ] Phase 7 — Polish: vendored fonts, accessibility, JSON export backed by Dexie, offline verify.
 
-> Note: in this phase the turn/make-up logic is still the mockup's (boolean make-up flag, no
-> bonus-Yahtzee gating). The agreed correct rules (derived turn state, per-player `makeupOwed`
-> counter, +100 gated on Yahtzee=50) land in phase 2 with the pure rules module and tests.
+Run `npm test` for the suite. To curate real audio, drop clips in `public/sounds/` (see the
+README there) — anything missing falls back to the built-in synth automatically.

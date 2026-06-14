@@ -46,12 +46,35 @@ function calcRow(name, hint, id0, id1, cls) {
     <div class="cell p0" id="${id0}">0</div><div class="cell p1" id="${id1}">0</div></div>`;
 }
 document.getElementById('upperCalc').innerHTML =
-  calcRow('Subtotal', '', 'sub0', 'sub1', 'sub') +
   calcRow('Bonus', '+35 if subtotal ≥ 63', 'bon0', 'bon1', 'bonus') +
   calcRow('Upper total', '', 'up0', 'up1', 'uptot');
 document.getElementById('lowerCalc').innerHTML =
-  calcRow('Lower total', '', 'low0', 'low1', 'lowtot') +
-  calcRow('GRAND TOTAL', '', 'grand0', 'grand1', 'grand');
+  calcRow('Lower total', '', 'low0', 'low1', 'lowtot');
+
+// Count-up animation for the big HUD totals. Sets the final value synchronously (so reads are
+// always correct), then animates from the previous shown value — rAF runs before paint, so no
+// flash of the final value. Skipped under reduced motion.
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const countAnim = new Map();
+function setTotal(el, target) {
+  if (!el) return;
+  const from = Number(el.dataset.shown ?? '0') || 0;
+  el.dataset.shown = String(target);
+  el.textContent = String(target);
+  if (reducedMotion() || from === target) return;
+  if (countAnim.has(el)) cancelAnimationFrame(countAnim.get(el));
+  let start = null;
+  const dur = 480;
+  const step = (ts) => {
+    if (start === null) start = ts;
+    const t = Math.min(1, (ts - start) / dur);
+    el.textContent = String(Math.round(from + (target - from) * t));
+    if (t < 1) countAnim.set(el, requestAnimationFrame(step));
+    else { el.textContent = String(target); countAnim.delete(el); }
+  };
+  countAnim.set(el, requestAnimationFrame(step));
+}
+let prevLeadSeat = null;   // for the comeback flash
 
 // Display value + order badge for a cell (bonus accumulates across rows).
 function displayCell(p, k) {
@@ -82,22 +105,50 @@ function refresh() {
       if (cell) { cell.classList.add('lastbox'); cell.classList.remove('empty'); cell.innerHTML = ''; }
     }
   });
-  // totals
+  // totals + per-player HUD
+  const grand = [0, 0];
   [0, 1].forEach(p => {
     const t = computeTotals(valuesP(p));
-    document.getElementById('sub' + p).textContent = t.upper;
+    grand[p] = t.grand;
     document.getElementById('bon' + p).textContent = t.bonus;
     document.getElementById('up' + p).textContent = t.upperTotal;
     document.getElementById('low' + p).textContent = t.lower;
-    document.getElementById('grand' + p).textContent = t.grand;
-    document.getElementById('tot' + p).textContent = t.grand;
+    setTotal(document.getElementById('tot' + p), t.grand);
     document.getElementById('meta' + p).textContent = filledBaseCount(valuesP(p)) + ' / 13 boxes';
+    document.getElementById('pmini' + p).textContent = `${t.upper} up · ${Math.max(0, 63 - t.upper)} to +35`;
   });
   document.querySelectorAll('.row.bonus').forEach((r, i) => r.classList.toggle('hit', computeTotals(valuesP(i)).bonus > 0));
-  // active-column highlight (A) — derived, advisory
-  document.querySelectorAll('.pcard').forEach(c => c.classList.toggle('active', +c.dataset.p === active && game.status === 'active'));
-  device.classList.toggle('turn-0', active === 0 && game.status === 'active');
-  device.classList.toggle('turn-1', active === 1 && game.status === 'active');
+
+  // ---- HUD center: round / leader / gap bar / savagery ----
+  const f0 = filledBaseCount(valuesP(0)), f1 = filledBaseCount(valuesP(1));
+  const over = game.status === 'finished';
+  document.getElementById('roundLabel').textContent = over ? 'Final' : `Round ${Math.min(13, Math.min(f0, f1) + 1)} of 13`;
+  const diff = grand[0] - grand[1];
+  document.getElementById('leaderLabel').textContent = diff === 0 ? 'Tied' : `${nameOf(diff > 0 ? 0 : 1)} +${Math.abs(diff)}`;
+  const gap = document.getElementById('gapFill');
+  const pct = Math.min(50, (Math.abs(diff) / 80) * 50);    // cap the bar at a 80-point gap
+  if (diff >= 0) { gap.style.left = (50 - pct) + '%'; gap.style.background = 'var(--p1)'; }
+  else { gap.style.left = '50%'; gap.style.background = 'var(--p2)'; }
+  gap.style.width = pct + '%';
+  const lvl = savageryLevel((f0 + f1) / 26, maxSavagery);
+  const sav = document.getElementById('savageLabel');
+  sav.textContent = 'L' + lvl; sav.dataset.lvl = lvl;
+
+  // comeback flash when the lead changes hands (or ties up)
+  const leadSeat = diff > 0 ? 0 : diff < 0 ? 1 : -1;
+  if (prevLeadSeat !== null && leadSeat !== prevLeadSeat && !reducedMotion()) {
+    const c = document.querySelector('.center');
+    if (c) { c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); }
+  }
+  prevLeadSeat = leadSeat;
+
+  // active highlight: panel scale + whole-screen tint (derived, advisory)
+  const lit = game.status === 'active';
+  document.querySelectorAll('.ppanel').forEach(c => c.classList.toggle('active', +c.dataset.p === active && lit));
+  device.classList.toggle('turn-0', active === 0 && lit);
+  device.classList.toggle('turn-1', active === 1 && lit);
+  document.body.classList.toggle('turn-0', active === 0 && lit);
+  document.body.classList.toggle('turn-1', active === 1 && lit);
   updateStatus(st);
 }
 
@@ -275,6 +326,7 @@ function startGame(seat) {
   const s0 = setupCard.querySelector('.setup0'), s1 = setupCard.querySelector('.setup1');
   setName(0, s0.value); setName(1, s1.value);
   game.startingSeat = seat; game.entries = []; game.orderCounter = 0; game.status = 'active';
+  prevLeadSeat = null;
   setupScrim.classList.remove('open');
   refresh();
   Speech.onTurn(nameOf(seat), soundOn);

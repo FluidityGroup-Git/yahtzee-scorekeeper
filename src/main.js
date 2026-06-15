@@ -10,6 +10,9 @@ import { Voice } from './ui/voice.js';
 import { Commentary } from './ui/commentary.js';
 import { buildContext } from './game/commentaryContext.js';
 import { CustomTriggers } from './ui/customTriggers.js';
+import { createGame, saveActive, finishGame, loadActiveGame, abandonActive } from './db.js';
+
+const persist = typeof indexedDB !== 'undefined';   // skip DB where unavailable (e.g. jsdom tests)
 
 // ---- dice glyph ----
 const FACES = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
@@ -17,8 +20,10 @@ function dieHTML(face) { let s = ''; for (let i = 0; i < 9; i++) s += FACES[face
 
 // ---- state: the entries log is canonical; turn state is derived by replaying it ----
 const game = {
+  id: undefined,      // Dexie games row id (set on createGame / resume)
   players: [{ name: 'Dan' }, { name: 'Amber' }],
   startingSeat: 0,
+  startedAt: undefined,
   entries: [],        // { playerId, category, value, orderIndex, recordedAt }
   orderCounter: 0,
   status: 'setup',    // 'setup' | 'active' | 'finished'
@@ -194,6 +199,7 @@ function recordEntry(p, k, value) {
   const newActive = turnState().activePlayer;
   const over = isGameOver(game.entries);
   if (!over && !isBonusTick && newActive !== prevActive) SoundEngine.play('turnpass');
+  if (persist) saveActive(game);   // debounced autosave
   // Commentary: the SFX above lands immediately and covers generation latency; the voice follows.
   if (over && game.status !== 'finished') onGameOver();
   else if (isNewScore) fireCommentary(p, k, value, leadBefore);
@@ -203,6 +209,7 @@ function clearScore(p, k) {
   if (k === 'yahtzeeBonus') game.entries = game.entries.filter(e => !(e.playerId === p && e.category === 'yahtzeeBonus'));
   else game.entries = game.entries.filter(e => !(e.playerId === p && e.category === k));
   refresh();
+  if (persist) saveActive(game);
 }
 
 const SLOT = { mega: 'bonus', legendary: 'yahtzee', epic: 'epic', great: 'great', nice: 'nice', bust: 'bust' };
@@ -222,6 +229,10 @@ function onGameOver() {
   game.status = 'finished';
   refresh();
   const w = decideWinner(game.entries);
+  if (persist) {
+    const winnerSeat = w.result === 'tie' ? null : (w.result === 'p0' ? 0 : 1);
+    finishGame(game, { result: w.result, winnerSeat, winnerName: winnerSeat == null ? null : nameOf(winnerSeat), totalsSnapshot: w.totals }).catch(() => {});
+  }
   let msg;
   if (w.result === 'tie') msg = `Tie at ${w.totals[0].grand}`;
   else { const wp = w.result === 'p0' ? 0 : 1; msg = `${nameOf(wp)} ${w.totals[wp].grand}–${w.totals[1 - wp].grand}`; }
@@ -336,12 +347,17 @@ function showSetup() {
   };
   setupScrim.classList.add('open');
 }
-function startGame(seat) {
+async function startGame(seat) {
   const s0 = setupCard.querySelector('.setup0'), s1 = setupCard.querySelector('.setup1');
   setName(0, s0.value); setName(1, s1.value);
   game.startingSeat = seat; game.entries = []; game.orderCounter = 0; game.status = 'active';
+  game.startedAt = new Date().toISOString();
   prevLeadSeat = null;
   Commentary.cancel();
+  if (persist) {
+    try { await abandonActive(); game.id = await createGame({ startingSeat: seat, players: [{ seat: 0, name: nameOf(0) }, { seat: 1, name: nameOf(1) }], startedAt: game.startedAt }); }
+    catch { game.id = undefined; }
+  }
   setupScrim.classList.remove('open');
   refresh();
 }
@@ -380,7 +396,7 @@ document.getElementById('dataBtn').addEventListener('click', () => {
     status: game.status,
     players: [0, 1].map(p => ({ seat: p, name: nameOf(p), totals: computeTotals(valuesP(p)) })),
     entries: [...game.entries].sort((a, b) => a.orderIndex - b.orderIndex)
-      .map(e => ({ gameId: '(unsaved)', playerId: e.playerId, category: e.category, value: e.value, orderIndex: e.orderIndex, recordedAt: e.recordedAt })),
+      .map(e => ({ gameId: game.id ?? '(unsaved)', playerId: e.playerId, category: e.category, value: e.value, orderIndex: e.orderIndex, recordedAt: e.recordedAt })),
   };
   entry.innerHTML = `<div class="grab"></div><div class="ehead"><div><div class="etitle">Captured game data</div><div class="ewho" style="color:var(--ink-soft)">Flat one-row-per-entry log</div></div></div>
     <p class="data-note">Each entry stores its <b>value</b>, the <b>order</b> it was recorded, and a timestamp — the canonical shape that drives stats and later mining.</p>
@@ -605,6 +621,37 @@ function openSettings() {
 // Unlock audio + speech on the first user gesture.
 window.addEventListener('pointerdown', () => { SoundEngine.warm(); Speech.warm(); }, { once: true });
 
-// ---- boot ----
-refresh();
-showSetup();
+// ---- boot: resume an autosaved game, finalize a complete one, or start fresh ----
+function hydrateSaved(saved) {
+  game.id = saved.id;
+  game.entries = saved.entries;
+  game.startingSeat = saved.startingSeat;
+  game.startedAt = saved.startedAt;
+  game.status = 'active';
+  game.orderCounter = saved.entries.reduce((m, e) => Math.max(m, e.orderIndex), 0);
+  (saved.players || []).forEach(p => { if (p && typeof p.seat === 'number') setName(p.seat, p.name); });
+  prevLeadSeat = null; Commentary.cancel();
+}
+async function finalizeLoaded() {
+  game.status = 'finished';
+  refresh();
+  const w = decideWinner(game.entries);
+  const winnerSeat = w.result === 'tie' ? null : (w.result === 'p0' ? 0 : 1);
+  try { await finishGame(game, { result: w.result, winnerSeat, winnerName: winnerSeat == null ? null : nameOf(winnerSeat), totalsSnapshot: w.totals }); } catch { /* ignore */ }
+}
+async function boot() {
+  if (persist) {
+    try {
+      const saved = await loadActiveGame();
+      if (saved) {
+        hydrateSaved(saved);
+        if (isGameOver(game.entries)) await finalizeLoaded();   // already complete -> finalize, don't resume
+        else refresh();                                          // resume exactly where we left off
+        return;
+      }
+    } catch { /* fall through to a fresh setup */ }
+  }
+  refresh();
+  showSetup();
+}
+boot();

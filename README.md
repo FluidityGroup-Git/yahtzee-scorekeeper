@@ -64,7 +64,10 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
       avoid repeating its own tics; **streak/trend flags** (scratch runs, cold streaks, a long-held lead)
       feed the prompt; and the leash is looser (react to the vibe, vary length). `temperature` stays 1.0
       (the API max).
-- [ ] Phase 3 — Dexie persistence (autosave + resume, order log). **Not yet — refresh still resets.**
+- [x] **Phase 3** — Dexie persistence (`src/db.js`): debounced autosave of the active game (full
+      delete+bulkPut of its entries), resume on reload (replays the log → same derived turn state),
+      finalize + save on game over, and `abandonActive()` when a new game starts. A loaded game that's
+      already complete is finalized instead of resumed. Finished games kept for History/Stats.
 - [ ] Phase 4 — New game / names, game-over finalize + save record.
 - [ ] Phase 5 — History screen.
 - [ ] Phase 6 / item F — Stats screen (Chart.js): donut, bars, lines, histogram, fun counters.

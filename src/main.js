@@ -14,6 +14,8 @@ import { createGame, saveActive, finishGame, loadActiveGame, abandonActive, allF
 import { computeStats } from './game/stats.js';
 import { openStats, closeStats } from './ui/stats.js';
 import { Mascots } from './ui/mascots.js';
+import { Celebration } from './ui/celebration.js';
+import { momentFor } from './game/moments.js';
 
 const persist = typeof indexedDB !== 'undefined';   // skip DB where unavailable (e.g. jsdom tests)
 
@@ -202,14 +204,16 @@ function recordEntry(p, k, value) {
   const crossedBonus = beforeBonus === 0 && computeTotals(valuesP(p)).bonus === 35;
   const isBonusTick = (k === 'yahtzeeBonus' && value > 0);
   refresh();
-  celebrate(p, k, value, crossedBonus, isBonusTick);
+  // Visuals (cell pop + toast + small confetti). The matched MOMENT sound is owned by the sequencer
+  // (fireMoment) for new scores, so celebrate only plays its own tier sound on EDITS.
+  celebrate(p, k, value, crossedBonus, isBonusTick, isNewScore);
   const newActive = turnState().activePlayer;
   const over = isGameOver(game.entries);
   if (!over && !isBonusTick && newActive !== prevActive) SoundEngine.play('turnpass');
   if (persist) saveActive(game);   // debounced autosave
-  // Commentary: the SFX above lands immediately and covers generation latency; the voice follows.
+  // Sequencer: matched sound + animation start together; the voice waits for the sound to finish.
   if (over && game.status !== 'finished') onGameOver();
-  else if (isNewScore) { fireCommentary(p, k, value, leadBefore); fireMascots(p, k, value, leadBefore, crossedBonus); }
+  else if (isNewScore) fireMoment(p, k, value, leadBefore, crossedBonus);
 
   // Announce a player's last turn (one base box left) once per player, during an active game.
   if (!over && game.status === 'active' && isNewScore) {
@@ -232,12 +236,12 @@ function clearScore(p, k) {
 }
 
 const SLOT = { mega: 'bonus', legendary: 'yahtzee', epic: 'epic', great: 'great', nice: 'nice', bust: 'bust' };
-function celebrate(p, k, value, crossedBonus, isBonusTick) {
+function celebrate(p, k, value, crossedBonus, isBonusTick, isNewScore) {
   if (k === 'yahtzeeBonus' && !isBonusTick) return; // resetting the bonus box isn't a celebration
   const tier = tierFor({ category: k, value, crossedBonus, isBonusTick });
   const cell = document.querySelector(`.cell[data-key="${k}"][data-p="${p}"]`);
   if (cell) { cell.classList.remove('pop', 'bust'); void cell.offsetWidth; cell.classList.add(tier === 'bust' ? 'bust' : 'pop'); }
-  SoundEngine.play(SLOT[tier] || 'tick');
+  if (!isNewScore) SoundEngine.play(SLOT[tier] || 'tick');   // new scores get the matched sound via fireMoment
   fireCelebration(tier);
   const ptsText = k === 'yahtzeeBonus' ? '+100' : (value === 0 ? '+0' : '+' + value);
   if (crossedBonus && tier === 'great') celebrationToast('great', '+' + value, 'UPPER BONUS! +35');
@@ -257,10 +261,18 @@ function onGameOver() {
   else { const wp = w.result === 'p0' ? 0 : 1; msg = `${nameOf(wp)} ${w.totals[wp].grand}–${w.totals[1 - wp].grand}`; }
   showToast('🏆', 'GAME OVER', msg);
   fireCelebration('legendary');
-  SoundEngine.play('yahtzee');
-  // Mascots: winner centre-stage with the loser slumped in the corner (both shrug on a tie). ONE call.
-  if (w.result === 'tie') Mascots.react('tie', { seat: 0, level: maxSavagery });
-  else { const wp = w.result === 'p0' ? 0 : 1; Mascots.react('winGame', { seat: wp, level: maxSavagery }); }
+  // Sequencer (same shape as a score): matched win/lose sound + full-canvas celebration + mascot pop,
+  // with the closing line's voice gated behind the sound. Nothing big on a tie.
+  let soundDone;
+  if (w.result === 'tie') {
+    soundDone = soundOn ? SoundEngine.playMatched('goodScore') : Promise.resolve();
+    Mascots.react('tie', { seat: 0, level: maxSavagery });   // both shrug
+  } else {
+    const wp = w.result === 'p0' ? 0 : 1;
+    soundDone = soundOn ? SoundEngine.playMatched('winGame') : Promise.resolve();
+    Celebration.play('winGame', { seat: wp });               // full-canvas spectacle for the winner
+    Mascots.react('winGame', { seat: wp, level: maxSavagery }); // winner centre, loser slumped in the corner
+  }
   // Closing commentary: winner hype + loser roast (or roast both on a tie).
   const level = savageryLevel(1, maxSavagery);
   let goCtx;
@@ -273,7 +285,7 @@ function onGameOver() {
       level, profanity: profanityOn, rivalry, scorerSeat: wp, scorer: nameOf(wp), opponent: nameOf(1 - wp),
       scorerTotal: w.totals[wp].grand, opponentTotal: w.totals[1 - wp].grand, leader: nameOf(wp), margin: w.totals[wp].grand - w.totals[1 - wp].grand };
   }
-  Commentary.react(goCtx);
+  Commentary.react(goCtx, { gateSpeak: soundDone });
 }
 
 // ---- bottom-sheet entry ----
@@ -378,6 +390,7 @@ async function startGame(seat) {
   lastTurnAnnounced = [false, false];
   Commentary.cancel();
   Mascots.reset();
+  Celebration.reset();
   if (persist) {
     try { await abandonActive(); game.id = await createGame({ startingSeat: seat, players: [{ seat: 0, name: nameOf(0) }, { seat: 1, name: nameOf(1) }], startedAt: game.startedAt }); }
     catch { game.id = undefined; }
@@ -468,22 +481,19 @@ Commentary.configure({
 
 // Mascots: a single centre stage. Mount once on boot.
 Mascots.mount(document.getElementById('mascot-stage'));
+// Celebration: the full-canvas backdrop layer. Mount once on boot.
+Celebration.mount(document.getElementById('celebration-layer'));
 
-// Derive the mascot moment from the same score values commentary uses. Priority when several could
-// fire on one score: bonusYahtzee > yahtzee > scratch > takeLead > upperBonus > goodScore. ONE call —
-// the stage renders the opponent cameo internally.
-function fireMascots(p, k, value, leadBefore, crossedBonus) {
-  const level = maxSavagery;
+// The score-moment sequencer. ONE orchestrated flow per NEW score: play the matched sound and start
+// the animation at the same time; the full-canvas celebration fires only on the marquee moments; the
+// AI voice is generated now but held until the sound finishes (latency hidden behind the sound).
+function fireMoment(p, k, value, leadBefore, crossedBonus) {
   const leadAfter = computeTotals(valuesP(0)).grand - computeTotals(valuesP(1)).grand;
-  const flipped = Math.sign(leadBefore) !== 0 && Math.sign(leadAfter) !== 0 && Math.sign(leadAfter) !== Math.sign(leadBefore);
-  let ev;
-  if (k === 'yahtzeeBonus' && value > 0) ev = 'bonusYahtzee';
-  else if (k === 'yahtzee' && value === 50) ev = 'yahtzee';
-  else if (value === 0) ev = 'scratch';
-  else if (flipped) ev = 'takeLead';          // a score only ever lifts the scorer, so they're the new leader
-  else if (crossedBonus) ev = 'upperBonus';
-  else ev = 'goodScore';
-  Mascots.react(ev, { seat: p, level });
+  const m = momentFor(p, k, value, leadBefore, leadAfter, crossedBonus);
+  const soundDone = soundOn ? SoundEngine.playMatched(m.sfx) : Promise.resolve();
+  if (m.celebrate) Celebration.play(m.celebrate, { seat: p });   // full-canvas, marquee moments only
+  Mascots.react(m.event, { seat: p, level: maxSavagery });       // character pops on the mascot stage
+  fireCommentary(p, k, value, leadBefore, { gateSpeak: soundDone });  // speak after the sound
 }
 
 // Rivalry digest of FINISHED games — reflects the head-to-head *before* the current game.
@@ -493,15 +503,16 @@ async function refreshRivalry() {
   catch { rivalry = null; }
 }
 
-// Fire a commentary line for a new score by either player.
-function fireCommentary(scorerSeat, category, value, leadBefore) {
+// Fire a commentary line for a new score by either player. opts.gateSpeak (a Promise) holds the
+// spoken voice until the matched sound finishes; the caption + synth still happen immediately.
+function fireCommentary(scorerSeat, category, value, leadBefore, opts = {}) {
   const progress = (filledBaseCount(valuesP(0)) + filledBaseCount(valuesP(1))) / 26;
   const ctx = buildContext({
     entries: game.entries, scorerSeat, names: [nameOf(0), nameOf(1)],
     lastCategory: category, lastValue: category === 'yahtzeeBonus' ? 100 : value,
     leadBefore, level: savageryLevel(progress, maxSavagery), profanity: profanityOn, rivalry,
   });
-  Commentary.react(ctx);
+  Commentary.react(ctx, opts);
 }
 
 function setAi(on) { AIPep.setEnabled(on); try { localStorage.setItem('yz_ai_pep', on ? '1' : '0'); } catch { /* ignore */ } }
@@ -685,7 +696,7 @@ function hydrateSaved(saved) {
   game.status = 'active';
   game.orderCounter = saved.entries.reduce((m, e) => Math.max(m, e.orderIndex), 0);
   (saved.players || []).forEach(p => { if (p && typeof p.seat === 'number') setName(p.seat, p.name); });
-  prevLeadSeat = null; lastTurnAnnounced = [false, false]; Commentary.cancel(); Mascots.reset();
+  prevLeadSeat = null; lastTurnAnnounced = [false, false]; Commentary.cancel(); Mascots.reset(); Celebration.reset();
 }
 async function finalizeLoaded() {
   game.status = 'finished';

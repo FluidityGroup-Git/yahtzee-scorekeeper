@@ -1,0 +1,52 @@
+/* Full-canvas celebration layer. Fixed, full-screen, pointer-events:none. Above the board, BELOW the
+   mascot character stage (z-index 55) and captions/modals (scrim 60, toast 75). Hidden by default. */
+.celebration-layer{position:fixed;inset:0;z-index:40;pointer-events:none;overflow:hidden;
+  opacity:0;visibility:hidden;transition:opacity .5s ease, visibility .5s ease;}
+.celebration-layer.show{opacity:1;visibility:visible;}
+.celebration-layer.fade{opacity:0;}
+
+#celebration-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+
+/* 1) Rotating conic-gradient sunburst pinwheel, low opacity, scorer accent leading. */
+.cel-rays{position:absolute;left:50%;top:54%;width:180vmax;height:180vmax;transform:translate(-50%,-50%);
+  border-radius:50%;opacity:.24;animation:cel-spin 20s linear infinite;
+  background:conic-gradient(from 0deg,var(--cel-accent,#FF5A47) 0 13deg,transparent 13deg 45deg,#FFC83D 45deg 58deg,
+    transparent 58deg 90deg,#4A90D9 90deg 103deg,transparent 103deg 135deg,#4CC38A 135deg 148deg,
+    transparent 148deg 180deg,#ED6A92 180deg 193deg,transparent 193deg 225deg,#7F77DD 225deg 238deg,
+    transparent 238deg 270deg,#FF8A3D 270deg 283deg,transparent 283deg 315deg,#4A90D9 315deg 328deg,
+    transparent 328deg 360deg);}
+@keyframes cel-spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+
+/* 2) Big typographic title slam — multi-colour bold letters, thick dark outline + drop shadow,
+   slamming in with an overshoot then a gentle float. */
+.cel-title{position:absolute;left:50%;top:16%;transform:translate(-50%,-50%);font-weight:900;
+  font-family:'Fredoka',system-ui,sans-serif;font-size:clamp(48px,12vw,170px);letter-spacing:3px;
+  -webkit-text-stroke:4px #14111f;text-shadow:0 8px 0 rgba(0,0,0,.4);white-space:nowrap;
+  animation:cel-slam .9s cubic-bezier(.2,1.4,.3,1) both, cel-float 2.4s ease-in-out .9s infinite;}
+.cel-title span{display:inline-block;}
+@keyframes cel-slam{0%{transform:translate(-50%,-50%) scale(2.6) rotate(-8deg);opacity:0}
+  60%{opacity:1}75%{transform:translate(-50%,-50%) scale(.94) rotate(2deg)}
+  100%{transform:translate(-50%,-50%) scale(1) rotate(0);opacity:1}}
+@keyframes cel-float{0%,100%{transform:translate(-50%,-50%) scale(1) rotate(-1deg)}
+  50%{transform:translate(-50%,-52%) scale(1.03) rotate(1deg)}}
+
+/* 4) Scattered CSS sparkles. */
+.cel-sparkles i{position:absolute;width:14px;height:14px;background:#fff;opacity:0;
+  clip-path:polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%);
+  animation:cel-twinkle 1.6s ease-in-out infinite;}
+.cel-sparkles i:nth-child(1){left:18%;top:30%;animation-delay:.0s}
+.cel-sparkles i:nth-child(2){left:78%;top:24%;animation-delay:.2s}
+.cel-sparkles i:nth-child(3){left:30%;top:62%;animation-delay:.4s}
+.cel-sparkles i:nth-child(4){left:66%;top:58%;animation-delay:.1s}
+.cel-sparkles i:nth-child(5){left:48%;top:18%;animation-delay:.5s;width:20px;height:20px}
+.cel-sparkles i:nth-child(6){left:12%;top:70%;animation-delay:.3s}
+.cel-sparkles i:nth-child(7){left:88%;top:66%;animation-delay:.6s}
+.cel-sparkles i:nth-child(8){left:55%;top:78%;animation-delay:.25s;width:18px;height:18px}
+@keyframes cel-twinkle{0%,100%{opacity:0;transform:scale(.4) rotate(0)}50%{opacity:.95;transform:scale(1) rotate(45deg)}}
+
+/* Reduced motion: no spin, no twinkle drift, no storm — just a calm title. */
+@media (prefers-reduced-motion: reduce){
+  .cel-rays{display:none;}
+  .cel-sparkles{display:none;}
+  .cel-title{animation:none;}
+}

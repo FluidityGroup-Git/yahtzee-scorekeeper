@@ -1,9 +1,32 @@
 // SoundEngine: plays a curated audio file per slot, falling back to the live Web Audio
 // synth when the file is missing — so nothing breaks before Dan vendors real clips.
-// Call sites only ever use: SoundEngine.play('tick' | 'nice' | 'great' | 'epic' |
-// 'yahtzee' | 'bonus' | 'bust' | 'turnpass').
+// Call sites use: SoundEngine.play('tick' | 'nice' | 'great' | 'epic' | 'yahtzee' | 'bonus' |
+// 'bust' | 'turnpass'), and the celebration sequencer uses SoundEngine.playMatched(<moment>)
+// which plays the matched clip and RESOLVES WHEN IT ENDS (so the AI voice can wait for it).
 
-const SLOTS = ['tick', 'nice', 'great', 'epic', 'yahtzee', 'bonus', 'bust', 'turnpass'];
+const SLOTS = [
+  'tick', 'nice', 'great', 'epic', 'yahtzee', 'bonus', 'bust', 'turnpass',
+  // matched moment clips (see scripts/gen-sounds.mjs); missing files fall back below.
+  'bonusYahtzee', 'scratch', 'takeLead', 'lastTurn', 'upperBonus', 'winGame', 'loseGame', 'goodScore',
+];
+
+// moment name -> preferred file slot first, then the closest existing fallback(s). The sequencer
+// keeps working before the matched files are generated: it plays the best available clip (or a
+// short synth blip) and always resolves so the voice is never blocked.
+const MOMENT = {
+  yahtzee:      ['yahtzee'],
+  bonusYahtzee: ['bonusYahtzee', 'bonus'],
+  scratch:      ['scratch', 'bust'],
+  takeLead:     ['takeLead', 'great'],
+  lastTurn:     ['lastTurn', 'nice'],
+  upperBonus:   ['upperBonus', 'great', 'nice'],
+  winGame:      ['winGame', 'yahtzee'],
+  loseGame:     ['loseGame', 'bust'],
+  goodScore:    ['goodScore', 'nice', 'tick'],
+};
+
+// Rough synth-fallback durations (s) so playMatched can resolve at a sensible time when no file exists.
+const SYNTH_DUR = { tick: 0.1, nice: 0.25, great: 0.45, epic: 0.6, yahtzee: 0.9, bonus: 1.2, bust: 1.3, turnpass: 0.2 };
 
 let enabled = true;
 let actx = null;
@@ -82,6 +105,40 @@ function playBuffer(buf) {
   src.buffer = buf; src.connect(g); g.connect(a.destination); src.start();
 }
 
+// Resolve a moment (or raw slot) to something playable: a loaded buffer if any slot in the chain
+// has one, else the first slot we have a synth for, else 'tick'.
+function resolveMoment(name) {
+  const chain = MOMENT[name] || [name];
+  for (const s of chain) if (buffers[s]) return { slot: s, buffer: buffers[s] };
+  for (const s of chain) if (synth[s]) return { slot: s };
+  return { slot: 'tick' };
+}
+
+// Play the matched clip and return a Promise that resolves when it ENDS. Safety-timeout-capped so it
+// ALWAYS resolves (clip duration + 300ms, capped ~3000ms). Resolves immediately when sound is off.
+function playMatched(name) {
+  if (!enabled) return Promise.resolve();
+  ac();
+  const r = resolveMoment(name);
+  if (r.buffer) {
+    return new Promise(resolve => {
+      let done = false; const finish = () => { if (!done) { done = true; resolve(); } };
+      const a = ac(), src = a.createBufferSource(), g = a.createGain();
+      src.buffer = r.buffer; src.connect(g); g.connect(a.destination);
+      src.onended = finish;
+      const ms = Math.min(3000, r.buffer.duration * 1000 + 300);
+      setTimeout(finish, ms);
+      try { src.start(); } catch { finish(); }
+    });
+  }
+  // Synth fallback has no `ended` event — play it and resolve after its estimated length.
+  return new Promise(resolve => {
+    (synth[r.slot] || synth.tick)();
+    const ms = Math.min(3000, (SYNTH_DUR[r.slot] || 0.4) * 1000 + 300);
+    setTimeout(resolve, ms);
+  });
+}
+
 export const SoundEngine = {
   // Unlock audio + kick off file loading on the first user gesture.
   warm() { ac(); loadFiles(); },
@@ -93,4 +150,7 @@ export const SoundEngine = {
     if (buffers[slot]) playBuffer(buffers[slot]);
     else (synth[slot] || synth.tick)();
   },
+  // Matched moment clip that resolves when the audio ends (or a capped safety timeout). Used by the
+  // celebration sequencer to hold the AI voice until the sound has finished.
+  playMatched,
 };

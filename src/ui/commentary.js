@@ -76,7 +76,9 @@ export const Commentary = {
   },
 
   // React to a score (or game-over). ctx.scorerSeat tints the caption.
-  // opts.budgetMs overrides the model-aware default (used by tests).
+  // opts.budgetMs   overrides the model-aware default (used by tests).
+  // opts.gateSpeak  optional Promise: the caption + synth happen immediately (latency hidden behind
+  //                 the matched sound), but the spoken audio is held until this resolves.
   async react(ctx, opts = {}) {
     if (!cfg) return null;
     const my = ++token;
@@ -108,6 +110,12 @@ export const Commentary = {
       try { blob = await Promise.race([cfg.synth(text, { signal: ac.signal }), new Promise(r => setTimeout(() => r(null), budgetMs))]); }
       catch { blob = null; }
       if (my !== token) return null;             // superseded while synthesizing — never enqueue
+    }
+    // Hold the spoken audio behind the matched sound: caption + synth already happened above, so the
+    // voice lands the instant the sound finishes. A rejected gate just proceeds.
+    if (opts.gateSpeak) {
+      try { await opts.gateSpeak; } catch { /* gate rejected — speak anyway */ }
+      if (my !== token) return null;             // a newer score landed while we waited — drop the line
     }
     // Let the current line finish; the newest queues behind it (no interruption).
     enqueue(line, blob);

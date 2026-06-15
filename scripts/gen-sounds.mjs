@@ -27,6 +27,18 @@ const SLOTS = [
   { slot: 'bonus',    duration: 2.6, influence: 0.6,  text: 'over-the-top slot-machine jackpot, cascading coins, chiptune explosion, crowd cheer' },
   { slot: 'bust',     duration: 1.6, influence: 0.8,  text: 'comedic sad trombone, classic womp-womp-womp, deadpan descending brass failure' },
   { slot: 'turnpass', duration: 0.45, influence: 0.85, text: 'quick playful swish whoosh, light page-turn, short and snappy' },
+
+  // Matched score-moment clips for the celebration sequencer (Part C). The sequencer falls back to
+  // the closest existing clip when one of these is not present, so generating them is optional.
+  // ('yahtzee' already exists above and doubles as the matched yahtzee moment.)
+  { slot: 'bonusYahtzee', duration: 2.0, influence: 0.6,  text: 'bigger explosive victory fanfare with a sparkle shimmer on top, huge celebration' },
+  { slot: 'scratch',      duration: 1.2, influence: 0.8,  text: 'comedic sad trombone womp-womp, deadpan descending failure' },
+  { slot: 'takeLead',     duration: 0.8, influence: 0.7,  text: 'quick rising whoosh sting, confident, snappy upward swell' },
+  { slot: 'lastTurn',     duration: 1.2, influence: 0.75, text: 'tense ticking riser, suspenseful build, clock ticking faster' },
+  { slot: 'upperBonus',   duration: 0.8, influence: 0.8,  text: 'bright coin ka-ching sparkle, cheerful reward chime' },
+  { slot: 'winGame',      duration: 2.0, influence: 0.6,  text: 'celebratory win jingle, warm and triumphant, happy resolution' },
+  { slot: 'loseGame',     duration: 1.2, influence: 0.7,  text: 'gentle descending defeat tone, soft sad resolve, not harsh' },
+  { slot: 'goodScore',    duration: 0.4, influence: 0.85, text: 'soft pleasant UI blip, single gentle confirmation tick' },
 ];
 
 // Minimal .env reader (no dotenv dependency); process.env wins if set.

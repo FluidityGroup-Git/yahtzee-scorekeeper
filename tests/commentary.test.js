@@ -151,3 +151,52 @@ describe('playback gate (let the line finish; queue the newest behind it)', () =
     expect(speak.mock.calls.map(c => c[0])).toEqual(['B']);
   });
 });
+
+describe('gateSpeak (hold the voice until the matched sound finishes)', () => {
+  it('captions + synthesizes immediately, but does NOT speak until the gate resolves', async () => {
+    let release; const gate = new Promise(r => { release = r; });
+    const caption = vi.fn(), synth = vi.fn(async () => ({ size: 1 })), playAudio = okPlay();
+    Commentary.configure({ canSpeak: () => true, ready: () => true,
+      generate: async () => ({ tagged: 't', plain: 'p' }),
+      voiceReady: () => true, voiceUsesTags: () => false, synth, playAudio,
+      speak: autoSpeak(), stopVoice: vi.fn(), caption });
+
+    const p = Commentary.react(ctx(), { gateSpeak: gate });
+    await flush();
+    expect(caption).toHaveBeenCalled();          // caption is instant
+    expect(synth).toHaveBeenCalled();            // synth is instant (latency hidden behind the sound)
+    expect(playAudio).not.toHaveBeenCalled();    // but the voice is held behind the gate
+
+    release();                                   // the sound finished
+    await p; await flush();
+    expect(playAudio).toHaveBeenCalled();         // now it speaks
+  });
+
+  it('drops the line if a newer score lands while waiting for the gate', async () => {
+    let release; const gate = new Promise(r => { release = r; });
+    const playAudio = okPlay();
+    Commentary.configure({ canSpeak: () => true, ready: () => true,
+      generate: async () => ({ tagged: 't', plain: 'p' }),
+      voiceReady: () => true, voiceUsesTags: () => false, synth: async () => ({ size: 1 }), playAudio,
+      speak: autoSpeak(), stopVoice: vi.fn(), caption: vi.fn() });
+
+    const p1 = Commentary.react(ctx(0), { gateSpeak: gate });   // waiting on the gate
+    await flush();
+    const p2 = Commentary.react(ctx(1));                        // newer score bumps the token
+    await flush();
+    release();                                                  // gate resolves, but p1 is superseded
+    await Promise.all([p1, p2]); await flush();
+    expect(playAudio).toHaveBeenCalledTimes(1);                 // only p2 spoke; p1 was dropped
+  });
+
+  it('a rejected gate just proceeds to speak (rejection is swallowed)', async () => {
+    const playAudio = okPlay();
+    Commentary.configure({ canSpeak: () => true, ready: () => true,
+      generate: async () => ({ tagged: 't', plain: 'p' }),
+      voiceReady: () => true, voiceUsesTags: () => false, synth: async () => ({ size: 1 }), playAudio,
+      speak: autoSpeak(), stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx(), { gateSpeak: Promise.reject(new Error('boom')) });
+    await flush();
+    expect(playAudio).toHaveBeenCalled();
+  });
+});

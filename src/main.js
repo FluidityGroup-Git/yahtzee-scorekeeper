@@ -9,6 +9,7 @@ import { AIPep, savageryLevel } from './ui/aiPep.js';
 import { Voice } from './ui/voice.js';
 import { Commentary } from './ui/commentary.js';
 import { buildContext } from './game/commentaryContext.js';
+import { CustomTriggers } from './ui/customTriggers.js';
 
 // ---- dice glyph ----
 const FACES = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
@@ -230,8 +231,15 @@ function onGameOver() {
   // Closing commentary: winner hype + loser roast (or roast both on a tie).
   const level = savageryLevel(1, maxSavagery);
   let goCtx;
-  if (w.result === 'tie') goCtx = { gameOver: true, tie: true, winScore: w.totals[0].grand, level, profanity: profanityOn, scorerSeat: 0 };
-  else { const wp = w.result === 'p0' ? 0 : 1; goCtx = { gameOver: true, winner: nameOf(wp), loser: nameOf(1 - wp), winScore: w.totals[wp].grand, loseScore: w.totals[1 - wp].grand, level, profanity: profanityOn, scorerSeat: wp }; }
+  if (w.result === 'tie') {
+    goCtx = { gameOver: true, tie: true, winScore: w.totals[0].grand, loseScore: w.totals[1].grand, level, profanity: profanityOn,
+      scorerSeat: 0, scorer: nameOf(0), opponent: nameOf(1), scorerTotal: w.totals[0].grand, opponentTotal: w.totals[1].grand, leader: null, margin: 0 };
+  } else {
+    const wp = w.result === 'p0' ? 0 : 1;
+    goCtx = { gameOver: true, winner: nameOf(wp), loser: nameOf(1 - wp), winScore: w.totals[wp].grand, loseScore: w.totals[1 - wp].grand,
+      level, profanity: profanityOn, scorerSeat: wp, scorer: nameOf(wp), opponent: nameOf(1 - wp),
+      scorerTotal: w.totals[wp].grand, opponentTotal: w.totals[1 - wp].grand, leader: nameOf(wp), margin: w.totals[wp].grand - w.totals[1 - wp].grand };
+  }
   Commentary.react(goCtx);
 }
 
@@ -386,6 +394,7 @@ let profanityOn = false;
 try { maxSavagery = Math.max(1, Math.min(5, parseInt(localStorage.getItem('yz_savagery') || '5', 10) || 5)); } catch { /* ignore */ }
 try { profanityOn = localStorage.getItem('yz_profanity') === '1'; } catch { /* ignore */ }
 Voice.load();
+CustomTriggers.load();
 try { AIPep.setEnabled(localStorage.getItem('yz_ai_pep') === '1'); } catch { /* ignore */ }
 
 const captionEl = document.getElementById('caption');
@@ -399,7 +408,9 @@ function showCaption(text, seat) {
 }
 
 Commentary.configure({
-  ready: () => soundOn && pepOn && AIPep.ready(),     // gated by mute + 💬 + a Claude key
+  canSpeak: () => soundOn && pepOn,                   // voice gate (custom lines work without a key)
+  ready: () => soundOn && pepOn && AIPep.ready(),     // AI gate: also needs a Claude key
+  customLine: (ctx) => CustomTriggers.lineFor(ctx),   // user-defined lines take priority
   generate: (ctx, opts) => AIPep.generateLine(ctx, opts),
   voiceReady: () => Voice.ready(),
   voiceUsesTags: () => Voice.usesTags(),
@@ -426,6 +437,84 @@ function setAi(on) { AIPep.setEnabled(on); try { localStorage.setItem('yz_ai_pep
 
 function setMaxSavagery(n) { maxSavagery = Math.max(1, Math.min(5, n)); try { localStorage.setItem('yz_savagery', String(maxSavagery)); } catch { /* ignore */ } }
 function setProfanity(on) { profanityOn = on; try { localStorage.setItem('yz_profanity', on ? '1' : '0'); } catch { /* ignore */ } }
+
+// ---- custom-trigger settings (author lines in-app) ----
+let customDraft = null;   // the rule being added/edited, or null
+const esc = (s) => String(s).replace(/</g, '&lt;');
+function triggerSummary(r) {
+  const w = r.when || {};
+  let s = w.type;
+  if (w.type === 'value') s = `value = ${w.value}`;
+  else if (w.type === 'category') s = META[w.category]?.name || w.category;
+  else if (w.type === 'categoryValue') s = `${META[w.category]?.name || w.category} = ${w.value}`;
+  else if (w.type === 'scratch') s = 'any scratch';
+  else if (w.type === 'event') s = `event: ${w.event}`;
+  if (w.player && w.player !== 'any') s += ` · ${w.player}`;
+  return s;
+}
+function captureDraft() {
+  if (!customDraft) return;
+  const w = customDraft.when;
+  const playerEl = document.getElementById('ctPlayer'); if (playerEl) w.player = playerEl.value;
+  const valEl = document.getElementById('ctValue'); if (valEl) w.value = valEl.value === '' ? undefined : parseInt(valEl.value, 10);
+  const catEl = document.getElementById('ctCat'); if (catEl) w.category = catEl.value;
+  const evEl = document.getElementById('ctEvent'); if (evEl) w.event = evEl.value;
+  const linesEl = document.getElementById('ctLines'); if (linesEl) customDraft.lines = linesEl.value.split('\n').map(s => s.trim()).filter(Boolean);
+}
+function customListHTML() {
+  const rows = CustomTriggers.all().map(r => `<div class="ctrow" data-id="${r.id}">
+      <button class="toggle mini ${r.enabled === false ? '' : 'on'}" data-act="toggle">${r.enabled === false ? 'Off' : 'On'}</button>
+      <div class="ctinfo" data-act="edit"><div class="ctcond">${esc(triggerSummary(r))}</div>
+        <div class="ctline">“${esc((r.lines && r.lines[0]) || '').slice(0, 48)}”${r.lines && r.lines.length > 1 ? ' +' + (r.lines.length - 1) : ''}</div></div>
+      <button class="ctdel" data-act="del" title="Delete">✕</button></div>`).join('');
+  return (rows || '<p class="data-note" style="color:var(--ink-soft);">No custom lines yet — they take priority over the AI.</p>')
+    + '<button class="bigbtn add" id="ctAdd" style="width:100%;margin-top:8px;">+ Add custom line</button>';
+}
+function customFormHTML(d) {
+  const t = d.when.type;
+  const opt = (sel, val, label) => `<option value="${val}"${sel === val ? ' selected' : ''}>${label}</option>`;
+  const catOpts = [...UPPER, ...LOWER].map(c => opt(d.when.category, c.key, c.name)).join('');
+  let fields;
+  if (t === 'value') fields = `<input class="selinput" id="ctValue" type="number" placeholder="value" value="${d.when.value ?? ''}" style="max-width:100px;">`;
+  else if (t === 'category') fields = `<select class="selinput" id="ctCat">${catOpts}</select>`;
+  else if (t === 'categoryValue') fields = `<select class="selinput" id="ctCat">${catOpts}</select><input class="selinput" id="ctValue" type="number" placeholder="value" value="${d.when.value ?? ''}" style="max-width:80px;">`;
+  else if (t === 'event') fields = `<select class="selinput" id="ctEvent">${opt(d.when.event, 'yahtzee', 'Yahtzee') + opt(d.when.event, 'bonusYahtzee', 'Bonus Yahtzee') + opt(d.when.event, 'gameOver', 'Game over')}</select>`;
+  else fields = '<span class="data-note" style="color:var(--ink-soft);">fires on any scratch</span>';
+  const playerOpts = opt(d.when.player || 'any', 'any', 'Any player') + opt(d.when.player, nameOf(0).toLowerCase(), nameOf(0)) + opt(d.when.player, nameOf(1).toLowerCase(), nameOf(1));
+  return `<div class="ctform">
+    <div class="setrow"><span>When</span><select class="selinput" id="ctType">${opt(t, 'value', 'value =') + opt(t, 'category', 'category') + opt(t, 'categoryValue', 'category + value') + opt(t, 'scratch', 'any scratch') + opt(t, 'event', 'event')}</select></div>
+    <div class="setrow"><span>Match</span><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">${fields}</span></div>
+    <div class="setrow"><span>Player</span><select class="selinput" id="ctPlayer">${playerOpts}</select></div>
+    <textarea class="keyinput" id="ctLines" rows="3" style="margin-top:8px;resize:vertical;" placeholder="One line per row. Tokens: {scorer} {opponent} {value} {category} {scorerTotal} {opponentTotal} {leader} {margin}">${esc((d.lines || []).join('\n'))}</textarea>
+    <div class="fixedwrap" style="margin-top:8px;"><button class="bigbtn score" id="ctSave">Save line</button><button class="bigbtn scratch" id="ctCancel">Cancel</button></div>
+    <div class="data-note" id="ctErr" style="color:var(--p2);"></div></div>`;
+}
+function wireCustomSection() {
+  if (customDraft) {
+    document.getElementById('ctType').onchange = (e) => { captureDraft(); customDraft.when = { ...customDraft.when, type: e.target.value }; openSettings(); };
+    document.getElementById('ctCancel').onclick = () => { customDraft = null; openSettings(); };
+    document.getElementById('ctSave').onclick = () => {
+      captureDraft();
+      const w = customDraft.when, t = w.type, err = document.getElementById('ctErr');
+      if ((t === 'value' || t === 'categoryValue') && (w.value == null || Number.isNaN(w.value))) { err.textContent = 'Enter a value.'; return; }
+      if ((t === 'category' || t === 'categoryValue') && !w.category) { err.textContent = 'Pick a category.'; return; }
+      if (t === 'event' && !w.event) { err.textContent = 'Pick an event.'; return; }
+      if (!customDraft.lines || !customDraft.lines.length) { err.textContent = 'Add at least one line.'; return; }
+      const payload = { when: w, lines: customDraft.lines, enabled: customDraft.enabled !== false };
+      if (customDraft.id) CustomTriggers.update(customDraft.id, payload); else CustomTriggers.add(payload);
+      customDraft = null; openSettings();
+    };
+  } else {
+    const addBtn = document.getElementById('ctAdd');
+    if (addBtn) addBtn.onclick = () => { customDraft = { when: { type: 'value', player: 'any' }, lines: [''], enabled: true }; openSettings(); };
+    entry.querySelectorAll('.ctrow').forEach(row => {
+      const id = row.dataset.id;
+      row.querySelector('[data-act="toggle"]').onclick = () => { const r = CustomTriggers.all().find(x => x.id === id); CustomTriggers.update(id, { enabled: r.enabled === false }); openSettings(); };
+      row.querySelector('[data-act="del"]').onclick = () => { CustomTriggers.remove(id); openSettings(); };
+      row.querySelector('[data-act="edit"]').onclick = () => { const r = CustomTriggers.all().find(x => x.id === id); customDraft = JSON.parse(JSON.stringify(r)); openSettings(); };
+    });
+  }
+}
 
 function openSettings() {
   SoundEngine.warm(); Speech.warm();
@@ -465,7 +554,10 @@ function openSettings() {
       <button class="bigbtn add" id="elTest">Test voice</button>
     </div>
     <div class="data-note" id="elStatus" style="margin-top:10px;">${v.voiceId ? 'Voice ID set.' : 'No voice ID yet.'}</div>
-    <p class="data-note" style="color:var(--ink-soft);">The ElevenLabs key is server-side: set <b>ELEVENLABS_API_KEY</b> in <b>.env</b> (not stored in the browser). <b>v3</b> performs the bracketed tags (most expressive); <b>Flash v2.5</b> is faster but ignores tags. With no key/offline it falls back to the device voice automatically.</p>`;
+    <p class="data-note" style="color:var(--ink-soft);">The ElevenLabs key is server-side: set <b>ELEVENLABS_API_KEY</b> in <b>.env</b> (not stored in the browser). <b>v3</b> performs the bracketed tags (most expressive); <b>Flash v2.5</b> is faster but ignores tags. With no key/offline it falls back to the device voice automatically.</p>
+
+    <div class="seclabel" style="margin:16px 2px 6px;">Custom lines</div>
+    ${customDraft ? customFormHTML(customDraft) : customListHTML()}`;
 
   const status = document.getElementById('keyStatus');
   const elStatus = document.getElementById('elStatus');
@@ -506,6 +598,7 @@ function openSettings() {
     elStatus.textContent = r.ok ? '✓ Played a sample.' : '✗ ' + r.error;
   };
 
+  wireCustomSection();
   scrim.classList.add('open');
 }
 

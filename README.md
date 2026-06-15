@@ -52,6 +52,12 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
       with comeback detection, "what they need to win", and jab fodder (weak uppers, untouched Chance,
       brutal scratches). Fallback chain: ElevenLabs (tagged, ~3.5s budget) → Web Speech (plain) → skip.
       A special closing line fires on game over (winner hype + loser roast).
+- [x] **Custom commentary triggers** — author your own lines in ⚙️ → *Custom lines* for specific events
+      (value, category, category+value, scratch, or event: Yahtzee/bonus/game-over, with an optional
+      player filter). Stored in `localStorage`; placeholders `{scorer} {opponent} {value} {category}
+      {scorerTotal} {opponentTotal} {leader} {margin}`. Custom lines take **priority** over the AI
+      (and work with no Claude key); the most-specific rule wins, multiple lines pick at random avoiding
+      repeats, and anything with no match falls through to the AI.
 - [ ] Phase 3 — Dexie persistence (autosave + resume, order log). **Not yet — refresh still resets.**
 - [ ] Phase 4 — New game / names, game-over finalize + save record.
 - [ ] Phase 5 — History screen.

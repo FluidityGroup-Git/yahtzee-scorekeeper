@@ -43,11 +43,18 @@ export const Commentary = {
     const ac = new AbortController();
     currentAbort = ac;
     if (cfg.stopVoice) cfg.stopVoice();          // never stack voices
-    if (!cfg.ready || !cfg.ready()) return null;
+    if (cfg.canSpeak && !cfg.canSpeak()) return null;   // muted / commentary voice off
 
+    // 1) User-defined custom triggers take PRIORITY and skip the AI (spoken verbatim).
     let line = null;
-    try { line = await cfg.generate(ctx, { signal: ac.signal }); } catch { line = null; }
-    if (my !== token || ac.signal.aborted || !line) return null;   // a newer score superseded us
+    if (cfg.customLine) { const cl = cfg.customLine(ctx); if (cl) line = { tagged: cl, plain: cl }; }
+
+    // 2) Otherwise fall through to the AI (needs a Claude key).
+    if (!line) {
+      if (!cfg.ready || !cfg.ready()) return null;
+      try { line = await cfg.generate(ctx, { signal: ac.signal }); } catch { line = null; }
+      if (my !== token || ac.signal.aborted || !line) return null;   // a newer score superseded us
+    }
 
     // Caption first — instant feedback even while v3 takes its time synthesizing.
     if (cfg.caption) cfg.caption(line.plain, ctx.scorerSeat);

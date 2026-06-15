@@ -28,6 +28,36 @@ describe('trigger + targeting', () => {
   });
 });
 
+describe('custom triggers take priority over the AI', () => {
+  it('speaks the custom line verbatim and SKIPS the AI when one matches', async () => {
+    const generate = vi.fn(async () => ({ tagged: 'AI', plain: 'AI' }));
+    const speak = vi.fn();
+    Commentary.configure({ canSpeak: () => true, ready: () => true, generate,
+      customLine: () => 'Boom! 23 on the nose.', voiceReady: () => false, speak, stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx());
+    expect(speak).toHaveBeenCalledWith('Boom! 23 on the nose.');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('falls through to the AI when no custom line matches', async () => {
+    const generate = vi.fn(async () => ({ tagged: 'AI line', plain: 'AI line' }));
+    const speak = vi.fn();
+    Commentary.configure({ canSpeak: () => true, ready: () => true, generate,
+      customLine: () => null, voiceReady: () => false, speak, stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx());
+    expect(generate).toHaveBeenCalled();
+    expect(speak).toHaveBeenCalledWith('AI line');
+  });
+
+  it('a custom line works even without a Claude key (AI not ready)', async () => {
+    const speak = vi.fn();
+    Commentary.configure({ canSpeak: () => true, ready: () => false, generate: vi.fn(),
+      customLine: () => 'No key needed.', voiceReady: () => false, speak, stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx());
+    expect(speak).toHaveBeenCalledWith('No key needed.');
+  });
+});
+
 describe('voice fallback chain', () => {
   it('ElevenLabs: synthesizes the TAGGED line and plays the blob (no Web Speech)', async () => {
     const synth = vi.fn(async () => ({ size: 1 }));

@@ -1,11 +1,12 @@
-// Two dice-mascot avatars — Dan (seat 0, blue) and Amber (seat 1, coral) — that idle (bob + blink,
-// Amber's bow sways, Dan winks with a wiggling tongue) and react to game events. All hand-coded SVG +
-// CSS, reduced-motion aware, no images/libraries. The event→reaction decision lives in the PURE,
-// exported `reactionFor(...)` so it's unit-testable without a DOM; `react()` applies the descriptor.
+// Center-stage reaction popout. A single full-screen stage (pointer-events: none, hidden by default)
+// pops the reacting character BIG in the middle of the screen, brings the opponent in for a corner
+// cameo on the spicy moments, then dismisses on the next mouse move / pointer / key, when the AI voice
+// line ends (Mascots.dismiss wired in main), or a max-hold fallback. All hand-coded SVG + CSS,
+// reduced-motion aware. The event→reaction decision stays in the PURE, exported reactionFor(...).
 import './mascots.css';
 
-// ---- the characters (reproduced exactly from the build spec; idle keyframes live in mascots.css) ----
-// Amber — coral, gap-tooth grin (the gap between the two front teeth is the white rect + dark centre).
+// ---- the characters (reproduced exactly; only the presentation changed) ----
+// Amber — coral, gap-tooth grin (white front-teeth plate + two divider rects + dark centre).
 const AMBER_SVG = `
 <svg class="mascot mascot-amber" width="210" height="220" viewBox="0 0 210 220" role="img" aria-label="Amber">
   <g class="arm"><rect x="40" y="92" width="14" height="42" rx="7" fill="#F2895C" stroke="#C8521F" stroke-width="2.5"/></g>
@@ -38,7 +39,7 @@ const AMBER_SVG = `
   <path d="M81 146 Q105 172 129 146" fill="none" stroke="#E8607A" stroke-width="6.5" stroke-linecap="round"/>
 </svg>`;
 
-// Dan — blue, glasses + greying (salt-and-pepper) beard + side-parted greying hair; idle wink + tongue.
+// Dan — blue, glasses + greying (salt-and-pepper) beard + side-parted greying hair; wink + tongue.
 const DAN_SVG = `
 <svg class="mascot mascot-dan" width="210" height="220" viewBox="0 0 210 220" role="img" aria-label="Dan">
   <g class="arm"><rect x="40" y="92" width="14" height="42" rx="7" fill="#4A90D9" stroke="#1F5FA5" stroke-width="2.5"/></g>
@@ -83,7 +84,7 @@ const BASE = {
   tie:           { cls: ['rx-tie'],       effects: [],                     hold: 1300 },
 };
 
-// Returns a descriptor { event, level, reduced, cls:[...], effects:[...], hold } — pure + testable.
+// Returns { event, level, reduced, cls:[...], effects:[...], hold } — pure + testable.
 export function reactionFor(event, level = 3, reduced = false) {
   const lvl = Math.max(1, Math.min(5, Math.round(Number(level)) || 3));
   if (reduced) return { event, level: lvl, reduced: true, cls: [`rx-${event}-static`], effects: [], hold: 700 };
@@ -94,11 +95,23 @@ export function reactionFor(event, level = 3, reduced = false) {
   return { event, level: lvl, reduced: false, cls, effects: [...base.effects], hold };
 }
 
-// ---- small transient effect nodes (inline SVG / CSS particles), removed on animationend ----
+// Opponent cameo per event (the other player crashing the shot). null = no cameo.
+function cameoFor(event) {
+  switch (event) {
+    case 'scratch': return { cls: 'rx-laugh', side: 'cameo-right' };          // points and cackles
+    case 'yahtzee': case 'bonusYahtzee': return { cls: 'rx-sideeye', side: 'cameo-left' };  // jealous side-eye
+    case 'takeLead': return { cls: 'rx-loselead', side: 'cameo-right' };      // overtaken double-take
+    case 'winGame': return { cls: 'rx-lose', side: 'cameo-right' };           // loser slumped in the corner
+    case 'tie': return { cls: 'rx-tie', side: 'cameo-right' };                // both shrug
+    default: return null;
+  }
+}
+
+// ---- transient effect nodes (inline SVG / CSS particles), removed on animationend + safety net ----
 const STAR = '<svg viewBox="0 0 24 24"><path d="M12 2l2.6 6.3 6.8.5-5.2 4.4 1.7 6.6L12 16.8 6.3 20.3 8 13.7 2.8 9.3l6.8-.5z"/></svg>';
 const EFFECT_HTML = {
-  confetti: '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>',
-  fireworks: '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>',
+  confetti: '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>',
+  fireworks: '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>',
   stars: `<span class="s-l">${STAR}</span><span class="s-r">${STAR}</span>`,
   crown: '<svg viewBox="0 0 64 40"><path d="M6 36 L10 10 L22 24 L32 6 L42 24 L54 10 L58 36 Z" fill="#FFC83D" stroke="#1A1B26" stroke-width="2.5" stroke-linejoin="round"/><circle cx="32" cy="6" r="3" fill="#FF5A47" stroke="#1A1B26" stroke-width="1.5"/></svg>',
   sweat: '<svg viewBox="0 0 24 36"><path d="M12 2 C5 16 4 22 4 26 a8 8 0 0 0 16 0 C20 22 19 16 12 2 Z" fill="#7FD0FF" stroke="#2E7CF6" stroke-width="2"/></svg>',
@@ -114,47 +127,80 @@ function spawnEffect(container, name, hold) {
   fx.innerHTML = EFFECT_HTML[name] || '';
   container.appendChild(fx);
   const done = () => { if (fx.parentNode) fx.remove(); };
-  fx.addEventListener('animationend', (e) => { if (e.target === fx) done(); });   // wrapper end = effect end
-  setTimeout(done, hold + 500);   // safety net so nothing ever piles up after many turns
+  fx.addEventListener('animationend', (e) => { if (e.target === fx) done(); });
+  setTimeout(done, hold + 600);   // safety net so nothing ever piles up after many turns
 }
 
 const reducedMotion = () => (typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)').matches : false);
 
-const state = [null, null];   // per-seat { container, svg, activeCls, timer }
+let stage = null, mainEl = null, cameoEl = null;
+let dismissTimer = null, dismissHandler = null;
 
-function clearReaction(st) {
-  if (!st) return;
-  if (st.timer) { clearTimeout(st.timer); st.timer = null; }
-  if (st.activeCls && st.svg) { st.svg.classList.remove(...st.activeCls); st.activeCls = null; }
-  st.container.querySelectorAll('.fx').forEach(n => n.remove());
+function removeDismissListeners() {
+  if (!dismissHandler) return;
+  window.removeEventListener('mousemove', dismissHandler);
+  window.removeEventListener('pointerdown', dismissHandler);
+  window.removeEventListener('keydown', dismissHandler);
+  dismissHandler = null;
+}
+function clearStage() {
+  if (dismissTimer) { clearTimeout(dismissTimer); dismissTimer = null; }
+  removeDismissListeners();
+  if (mainEl) mainEl.innerHTML = '';
+  if (cameoEl) { cameoEl.innerHTML = ''; cameoEl.className = 'stage-cameo'; }
 }
 
 export const Mascots = {
-  // Inject the two SVGs into their per-player containers and start idle (idle anims are CSS-driven).
-  mount({ seat0El, seat1El } = {}) {
-    [seat0El, seat1El].forEach((el, seat) => {
-      if (!el) return;
-      el.classList.add('mascot-mount', seat === 0 ? 'mount-dan' : 'mount-amber');
-      el.innerHTML = SVG[seat];
-      state[seat] = { container: el, svg: el.querySelector('.mascot'), activeCls: null, timer: null };
-    });
+  // Adopt the given #mascot-stage (or create one on <body>). Hidden until a reaction.
+  mount(stageEl) {
+    stage = stageEl || document.getElementById('mascot-stage');
+    if (!stage) { stage = document.createElement('div'); stage.id = 'mascot-stage'; document.body.appendChild(stage); }
+    stage.className = 'mascot-stage';
+    stage.setAttribute('aria-hidden', 'true');
+    stage.innerHTML = '<div class="stage-backdrop"></div><div class="stage-main"></div><div class="stage-cameo"></div>';
+    mainEl = stage.querySelector('.stage-main');
+    cameoEl = stage.querySelector('.stage-cameo');
   },
 
-  // Play a time-boxed reaction on that seat's mascot. Returns nothing.
+  // ONE call per moment: pop the scorer big + bring in the opponent cameo, then arm dismissal.
   react(event, { seat, level = 3 } = {}) {
-    const st = state[seat];
-    if (!st || !st.svg) return;
+    if (!stage || seat == null) return;
     const d = reactionFor(event, level, reducedMotion());
-    clearReaction(st);
-    if (d.cls.length) st.svg.classList.add(...d.cls);
-    st.activeCls = d.cls.slice();
-    d.effects.forEach(name => spawnEffect(st.container, name, d.hold));
-    st.timer = setTimeout(() => {
-      if (st.activeCls && st.svg) st.svg.classList.remove(...st.activeCls);
-      st.activeCls = null; st.timer = null;
-    }, d.hold);   // class clears -> back to idle
+    clearStage();   // a new reaction replaces the current pop (newest wins)
+
+    // big centre character
+    mainEl.innerHTML = SVG[seat];
+    const svg = mainEl.querySelector('.mascot');
+    svg.classList.add(...d.cls);
+    if (!d.reduced) d.effects.forEach(name => spawnEffect(mainEl, name, d.hold));
+
+    // opponent cameo (skip under reduced motion)
+    if (!d.reduced) {
+      const cam = cameoFor(event);
+      if (cam) {
+        cameoEl.innerHTML = SVG[1 - seat];
+        cameoEl.querySelector('.mascot').classList.add(cam.cls);
+        cameoEl.classList.add('show-cameo', cam.side);
+      }
+    }
+
+    stage.classList.add('show');
+
+    // dismiss on the next mouse move / pointer / key, or a capped max-hold fallback
+    const max = Math.min(9000, (d.hold || 1000) + 2500);
+    dismissTimer = setTimeout(() => this.dismiss(), max);
+    dismissHandler = () => this.dismiss();
+    window.addEventListener('mousemove', dismissHandler, { once: true });
+    window.addEventListener('pointerdown', dismissHandler, { once: true });
+    window.addEventListener('keydown', dismissHandler, { once: true });
   },
 
-  // All mascots back to idle (new game / hydrate).
-  reset() { state.forEach(clearReaction); },
+  // Fade out + clear (also wired to the AI voice end). Safe to call when nothing is showing.
+  dismiss() {
+    if (!stage) return;
+    stage.classList.remove('show');
+    clearStage();
+  },
+
+  reset() { this.dismiss(); },
 };

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// Mascots: pure event->reaction mapping (reactionFor) + a jsdom mount/react/reset test.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+// Mascots: pure event->reaction mapping (reactionFor) + the single center-stage mount/react/dismiss API.
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Mascots, reactionFor } from '../src/ui/mascots.js';
 
 describe('reactionFor (pure)', () => {
@@ -30,38 +30,61 @@ describe('reactionFor (pure)', () => {
     const d = reactionFor('yahtzee', 5, true);
     expect(d.reduced).toBe(true);
     expect(d.effects).toEqual([]);
-    expect(d.cls).toEqual(['rx-yahtzee-static']);   // single static class, no animated effects
+    expect(d.cls).toEqual(['rx-yahtzee-static']);
     expect(d.hold).toBeLessThanOrEqual(800);
   });
 });
 
-describe('mount / react / reset (jsdom)', () => {
-  let s0, s1;
+describe('center stage (jsdom)', () => {
+  let stage;
+  const setReduced = (m) => { window.matchMedia = () => ({ matches: m, addEventListener() {}, removeEventListener() {} }); };
+
   beforeEach(() => {
-    window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-    document.body.innerHTML = '<div id="m0"></div><div id="m1"></div>';
-    s0 = document.getElementById('m0'); s1 = document.getElementById('m1');
-    Mascots.mount({ seat0El: s0, seat1El: s1 });
+    setReduced(false);
+    document.body.innerHTML = '<div id="mascot-stage" class="mascot-stage" aria-hidden="true"></div>';
+    stage = document.getElementById('mascot-stage');
+    Mascots.mount(stage);
+  });
+  afterEach(() => Mascots.dismiss());
+
+  it('mount adopts the stage; nothing is shown until a reaction', () => {
+    expect(stage.classList.contains('show')).toBe(false);
+    expect(stage.querySelector('.stage-main .mascot')).toBeNull();
   });
 
-  it('mounts two SVGs into the given containers', () => {
-    expect(s0.querySelector('svg.mascot.mascot-dan')).toBeTruthy();
-    expect(s1.querySelector('svg.mascot.mascot-amber')).toBeTruthy();
-    // Amber keeps her gap-tooth detail and Dan his glasses/beard in the markup.
-    expect(s1.innerHTML).toContain('rx="4" fill="#FFF7EF"');     // the front-teeth plate (gap rects sit over it)
-    expect(s0.innerHTML).toContain('#6B5E54');                   // beard fill
+  it('react pops the scorer big with the reaction class + an effect, and an opponent cameo', () => {
+    Mascots.react('yahtzee', { seat: 1 });
+    expect(stage.classList.contains('show')).toBe(true);
+    const main = stage.querySelector('.stage-main .mascot');
+    expect(main.classList.contains('mascot-amber')).toBe(true);     // seat 1 = Amber, centre stage
+    expect(main.classList.contains('rx-yahtzee')).toBe(true);
+    expect(stage.querySelector('.fx')).toBeTruthy();                // at least one effect node
+    expect(stage.querySelector('.stage-cameo .mascot.mascot-dan')).toBeTruthy(); // opponent cameo
   });
 
-  it('react applies the reaction to the named seat only, then reset clears both to idle', () => {
+  it('a new react replaces the current pop (newest wins, one character centred)', () => {
+    Mascots.react('yahtzee', { seat: 1 });
+    Mascots.react('scratch', { seat: 0 });
+    expect(stage.querySelectorAll('.stage-main .mascot').length).toBe(1);
+    const main = stage.querySelector('.stage-main .mascot');
+    expect(main.classList.contains('mascot-dan')).toBe(true);
+    expect(main.classList.contains('rx-scratch')).toBe(true);
+  });
+
+  it('dismiss hides and empties the stage', () => {
     Mascots.react('yahtzee', { seat: 0 });
-    expect(s0.querySelector('.mascot').classList.contains('rx-yahtzee')).toBe(true);
-    expect(s0.querySelector('.fx')).toBeTruthy();                 // a transient effect node spawned
-    expect(s1.querySelector('.mascot').classList.contains('rx-yahtzee')).toBe(false);
-    expect(s1.querySelector('.fx')).toBeNull();
+    Mascots.dismiss();
+    expect(stage.classList.contains('show')).toBe(false);
+    expect(stage.querySelector('.mascot')).toBeNull();
+    expect(stage.querySelector('.fx')).toBeNull();
+  });
 
-    Mascots.reset();
-    expect(s0.querySelector('.mascot').classList.contains('rx-yahtzee')).toBe(false);
-    expect(s0.querySelector('.fx')).toBeNull();
-    expect(s1.querySelector('.fx')).toBeNull();
+  it('reduced motion: a minimal pop — no particles, no opponent cameo', () => {
+    setReduced(true);
+    Mascots.react('yahtzee', { seat: 0 });
+    expect(stage.classList.contains('show')).toBe(true);
+    expect(stage.querySelector('.stage-main .mascot').classList.contains('rx-yahtzee-static')).toBe(true);
+    expect(stage.querySelector('.fx')).toBeNull();
+    expect(stage.querySelector('.stage-cameo .mascot')).toBeNull();
   });
 });

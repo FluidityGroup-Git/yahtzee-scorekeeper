@@ -29,12 +29,20 @@ export function synthBudgetMs(fast) { return fast ? FAST_BUDGET_MS : V3_BUDGET_M
 // Single-slot playback gate: only one line speaks at a time; the newest waiting line wins.
 let speaking = false;
 let queued = null;
+let activeKill = null;   // suppresses onLineEnd for a deliberately-stopped line (cancel/mute)
 
 // Perform exactly ONE spoken utterance; resolve when it ENDS (not when it starts).
 function utterOnce(line, blob) {
   return new Promise(resolve => {
-    let done = false;
-    const settle = () => { if (done) return; done = true; resolve(); };
+    let done = false, suppressed = false;
+    const settle = () => {
+      if (done) return;
+      done = true; activeKill = null; resolve();
+      // The line actually ENDED (audio ended / speech end) — tell main once (drives the popout dismiss).
+      // A deliberate stop sets `suppressed`, so cancel()/mute never fires it.
+      if (!suppressed && cfg && cfg.onLineEnd) cfg.onLineEnd();
+    };
+    activeKill = () => { suppressed = true; settle(); };
     if (blob && cfg.playAudio) {
       Promise.resolve(cfg.playAudio(blob, { onEnded: settle }))
         .then(ok => { if (!ok) { if (cfg.speak) cfg.speak(line.plain, { onEnd: settle }); else settle(); } })
@@ -62,6 +70,7 @@ export const Commentary = {
   cancel() {
     token++;
     queued = null; speaking = false;                 // clear the gate too
+    if (activeKill) activeKill();                     // settle the current line without firing onLineEnd
     if (currentAbort) { currentAbort.abort(); currentAbort = null; }
     if (cfg && cfg.stopVoice) cfg.stopVoice();
   },

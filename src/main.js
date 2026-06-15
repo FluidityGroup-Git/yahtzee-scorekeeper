@@ -258,9 +258,9 @@ function onGameOver() {
   showToast('🏆', 'GAME OVER', msg);
   fireCelebration('legendary');
   SoundEngine.play('yahtzee');
-  // Mascots: winner celebrates, loser slumps (both shrug on a tie).
-  if (w.result === 'tie') { Mascots.react('tie', { seat: 0, level: maxSavagery }); Mascots.react('tie', { seat: 1, level: maxSavagery }); }
-  else { const wp = w.result === 'p0' ? 0 : 1; Mascots.react('winGame', { seat: wp, level: maxSavagery }); Mascots.react('loseGame', { seat: 1 - wp, level: maxSavagery }); }
+  // Mascots: winner centre-stage with the loser slumped in the corner (both shrug on a tie). ONE call.
+  if (w.result === 'tie') Mascots.react('tie', { seat: 0, level: maxSavagery });
+  else { const wp = w.result === 'p0' ? 0 : 1; Mascots.react('winGame', { seat: wp, level: maxSavagery }); }
   // Closing commentary: winner hype + loser roast (or roast both on a tie).
   const level = savageryLevel(1, maxSavagery);
   let goCtx;
@@ -463,15 +463,17 @@ Commentary.configure({
   stopVoice: () => { Voice.stop(); Speech.stop(); },
   speak: (t, opts) => Speech.say(t, opts),
   caption: (t, seat) => showCaption(t, seat),
+  onLineEnd: () => Mascots.dismiss(),                 // centre-stage pop dismisses when the voice ends
 });
 
-// Mascots: one beside each player; react at the same points commentary fires.
-Mascots.mount({ seat0El: document.getElementById('mascot0'), seat1El: document.getElementById('mascot1') });
+// Mascots: a single centre stage. Mount once on boot.
+Mascots.mount(document.getElementById('mascot-stage'));
 
-// Derive a mascot reaction from the same score values commentary uses. Priority when several could
-// fire on one score: Yahtzee/bonus > takeLead > upperBonus > goodScore.
+// Derive the mascot moment from the same score values commentary uses. Priority when several could
+// fire on one score: bonusYahtzee > yahtzee > scratch > takeLead > upperBonus > goodScore. ONE call —
+// the stage renders the opponent cameo internally.
 function fireMascots(p, k, value, leadBefore, crossedBonus) {
-  const opp = 1 - p, level = maxSavagery;
+  const level = maxSavagery;
   const leadAfter = computeTotals(valuesP(0)).grand - computeTotals(valuesP(1)).grand;
   const flipped = Math.sign(leadBefore) !== 0 && Math.sign(leadAfter) !== 0 && Math.sign(leadAfter) !== Math.sign(leadBefore);
   let ev;
@@ -482,9 +484,6 @@ function fireMascots(p, k, value, leadBefore, crossedBonus) {
   else if (crossedBonus) ev = 'upperBonus';
   else ev = 'goodScore';
   Mascots.react(ev, { seat: p, level });
-  // Opponent reactions: cackle at a scratch; jealous double-take at a Yahtzee/bonus or being overtaken.
-  if (ev === 'scratch') Mascots.react('opponentLaugh', { seat: opp, level });
-  else if (ev === 'yahtzee' || ev === 'bonusYahtzee' || ev === 'takeLead') Mascots.react('loseLead', { seat: opp, level });
 }
 
 // Rivalry digest of FINISHED games — reflects the head-to-head *before* the current game.

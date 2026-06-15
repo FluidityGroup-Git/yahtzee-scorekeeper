@@ -79,6 +79,28 @@ describe('voice fallback chain', () => {
     expect(speak.mock.calls[0][0]).toBe('hi');
   });
 
+  it('retries the synth ONCE on an error, then uses ElevenLabs audio (no Web Speech)', async () => {
+    let n = 0;
+    const synth = vi.fn(async () => { if (n++ === 0) throw new Error('proxy blip'); return { size: 1 }; });
+    const playAudio = okPlay(), speak = autoSpeak();
+    Commentary.configure({ canSpeak: () => true, ready: () => true, generate: async () => ({ tagged: '[low] hi', plain: 'hi' }),
+      voiceReady: () => true, voiceUsesTags: () => true, synth, playAudio, speak, stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx(), { budgetMs: 200 }); await flush();
+    expect(synth).toHaveBeenCalledTimes(2);     // the retry fired
+    expect(playAudio).toHaveBeenCalled();
+    expect(speak).not.toHaveBeenCalled();
+  });
+
+  it('falls back to Web Speech when the synth rejects twice', async () => {
+    const synth = vi.fn(async () => { throw new Error('down'); });
+    const speak = autoSpeak();
+    Commentary.configure({ canSpeak: () => true, ready: () => true, generate: async () => ({ tagged: '[low] hi', plain: 'hi' }),
+      voiceReady: () => true, voiceUsesTags: () => true, synth, playAudio: vi.fn(), speak, stopVoice: vi.fn(), caption: vi.fn() });
+    await Commentary.react(ctx(), { budgetMs: 200 }); await flush();
+    expect(synth).toHaveBeenCalledTimes(2);     // tried, retried, then gave up
+    expect(speak.mock.calls.at(-1)[0]).toBe('hi');
+  });
+
   it('falls back to Web Speech when blob playback fails', async () => {
     const speak = autoSpeak();
     Commentary.configure({ canSpeak: () => true, ready: () => true, generate: async () => ({ tagged: 't', plain: 'p' }),

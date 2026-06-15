@@ -10,7 +10,7 @@ import { Voice } from './ui/voice.js';
 import { Commentary } from './ui/commentary.js';
 import { buildContext, rivalryDigest } from './game/commentaryContext.js';
 import { CustomTriggers } from './ui/customTriggers.js';
-import { createGame, saveActive, finishGame, loadActiveGame, abandonActive, allFinished } from './db.js';
+import { createGame, saveActive, finishGame, loadActiveGame, abandonActive, allFinished, exportData, importData } from './db.js';
 import { computeStats } from './game/stats.js';
 import { openStats, closeStats } from './ui/stats.js';
 import { Mascots } from './ui/mascots.js';
@@ -639,7 +639,16 @@ function openSettings() {
     <p class="data-note" style="color:var(--ink-soft);">The ElevenLabs key is server-side: set <b>ELEVENLABS_API_KEY</b> in <b>.env</b> (not stored in the browser). <b>v3</b> performs the bracketed tags (most expressive); <b>Flash v2.5</b> is faster but ignores tags. With no key/offline it falls back to the device voice automatically.</p>
 
     <div class="seclabel" style="margin:16px 2px 6px;">Custom lines</div>
-    ${customDraft ? customFormHTML(customDraft) : customListHTML()}`;
+    ${customDraft ? customFormHTML(customDraft) : customListHTML()}
+
+    <div class="seclabel" style="margin:16px 2px 6px;">Data</div>
+    <p class="data-note" style="color:var(--ink-soft);margin-bottom:8px;">Back up all finished games to a file, or restore one. Keeps your games if the browser or dev origin changes.</p>
+    <div class="fixedwrap">
+      <button class="bigbtn score" id="dataBackup">Backup</button>
+      <button class="bigbtn add" id="dataRestore">Restore</button>
+    </div>
+    <input type="file" id="dataRestoreFile" accept="application/json" style="display:none">
+    <div class="data-note" id="dataStatus" style="margin-top:10px;"></div>`;
 
   const status = document.getElementById('keyStatus');
   const elStatus = document.getElementById('elStatus');
@@ -678,6 +687,34 @@ function openSettings() {
     elStatus.textContent = 'Testing voice…';
     const r = await Voice.test();
     elStatus.textContent = r.ok ? '✓ Played a sample.' : '✗ ' + r.error;
+  };
+
+  const dataStatus = document.getElementById('dataStatus');
+  document.getElementById('dataBackup').onclick = async () => {
+    try {
+      const data = await exportData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `yahtzee-backup-${now().slice(0, 10)}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      dataStatus.textContent = `Backed up ${data.games.length} game${data.games.length === 1 ? '' : 's'}.`;
+    } catch (e) { dataStatus.textContent = 'Backup failed: ' + (e?.message || e); }
+  };
+  const restoreFile = document.getElementById('dataRestoreFile');
+  document.getElementById('dataRestore').onclick = () => restoreFile.click();
+  restoreFile.onchange = async () => {
+    const file = restoreFile.files && restoreFile.files[0];
+    if (!file) return;
+    dataStatus.textContent = 'Restoring…';
+    try {
+      const res = await importData(JSON.parse(await file.text()));
+      dataStatus.textContent = `Imported ${res.games} game${res.games === 1 ? '' : 's'}.`;
+      await refreshRivalry();                       // refresh the head-to-head digest from the new data
+      if (document.getElementById('statsScreen').classList.contains('open')) await openStats(); // refresh Stats if open
+    } catch (e) { dataStatus.textContent = 'Restore failed: ' + (e?.message || e); }
+    restoreFile.value = '';
   };
 
   wireCustomSection();

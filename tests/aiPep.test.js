@@ -130,11 +130,43 @@ describe('no truncation, no repeat, no silence', () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
-  it('requests max_tokens 150 (longer lines do not truncate)', async () => {
+  it('requests max_tokens 60 (lines are kept short, ~<=10s of speech)', async () => {
     stubFetch('a line');
     AIPep.setKey('sk-mt'); AIPep.setEnabled(true);
     await AIPep.generateLine(baseCtx());
-    expect(JSON.parse(calls[0].opts.body).max_tokens).toBe(150);
+    expect(JSON.parse(calls[0].opts.body).max_tokens).toBe(60);
+  });
+
+  it('SYSTEM caps length (~20 words) and drops the old vary-length-wildly guidance', async () => {
+    stubFetch('a line');
+    AIPep.setKey('sk-sys'); AIPep.setEnabled(true);
+    await AIPep.generateLine(baseCtx());
+    const system = JSON.parse(calls[0].opts.body).system;
+    expect(system).toMatch(/never more than ~20 words/);
+    expect(system).not.toMatch(/Vary length wildly/);
+  });
+});
+
+describe('length safety net (<=10s lines)', () => {
+  const wc = (s) => (s.trim().match(/\S+/g) || []).length;
+
+  it('re-rolls once on an over-long line, then trims to within the word cap', async () => {
+    const longLine = 'Dan that throw was a sprawling catastrophic geopolitical incident of such staggering magnitude that historians will write entire weeping volumes about the single cursed moment your trembling hand released those clattering doomed little cubes.';
+    expect(wc(longLine)).toBeGreaterThan(22);
+    let n = 0;
+    globalThis.fetch = vi.fn(async () => { n++; return { ok: true, json: async () => ({ content: [{ type: 'text', text: longLine }] }) }; });
+    AIPep.setKey('sk-long'); AIPep.setEnabled(true);
+    const line = await AIPep.generateLine(baseCtx());
+    expect(line).not.toBeNull();
+    expect(wc(line.plain)).toBeLessThanOrEqual(22);     // trimmed to the cap
+    expect(n).toBe(2);                                   // the re-roll fired
+  });
+
+  it('leaves a short line untouched', async () => {
+    const shortLine = 'Brutal, Dan. Just brutal.';
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: shortLine }] }) }));
+    AIPep.setKey('sk-short'); AIPep.setEnabled(true);
+    expect((await AIPep.generateLine(baseCtx())).plain).toBe(shortLine);
   });
 });
 

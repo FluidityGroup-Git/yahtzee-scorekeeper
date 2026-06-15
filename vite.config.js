@@ -9,7 +9,8 @@ export default defineConfig(({ mode }) => {
   const getElevenKey = () => process.env.ELEVENLABS_API_KEY || env.ELEVENLABS_API_KEY || '';
   return {
     // Bind to all interfaces so the dev server is reachable from a phone on the LAN.
-    server: { host: true },
+    server: { host: true, port: 8473, strictPort: true },
+    preview: { host: true, port: 8474, strictPort: true },
     plugins: [
       ttsProxyPlugin(getElevenKey),
       VitePWA({

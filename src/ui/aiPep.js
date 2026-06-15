@@ -16,7 +16,7 @@ const SYSTEM = [
   'Each line gets a random DELIVERY PERSONA and a SENTENCE SHAPE. Commit completely and lean in hard; they are your engine of variety, so never settle into one recognizable house voice.',
   'Be bold and weird: invent confident fake statistics, spin conspiracy theories about their dice, deliver mock-political attack-ad bombast and pundit ranting, take wild tangents, escalate into absurdity. "Political" is a comedic STYLE only (attack-ad / pundit theater) about the GAME and these two players, never real-world partisanship and never real people or groups.',
   'Build the joke out of the SPECIFIC situation (the exact number, the box they torched, the gap, a cold streak) then twist it: an unexpected comparison, a vivid image, misdirection, a little wordplay. Do not flatly recite the stats.',
-  'Craft matters: keep it tight, cut filler, put the funniest word last. Vary length wildly, from a three-word verdict to one full unhinged sentence.',
+  'Craft matters: keep it tight and cut filler. Output ONE short spoken line — never more than ~20 words, and usually much shorter. Put the funniest word last. A three-word verdict is great; just never ramble.',
   'Do NOT reuse a joke, comparison, metaphor, or punchline structure from the recent lines you are shown; find a genuinely different angle each time. You MAY call back to an earlier bit only if the callback itself is the joke.',
   'When given RIVALRY HISTORY, weaponize it for extra sting or a callback (a losing streak, a personal best they are nowhere near, how last game went) but only when it sharpens the joke; never just recite it.',
   'When told it is a players LAST TURN, treat it as a final-box moment: crank the tension or mock the pressure mercilessly.',
@@ -71,6 +71,37 @@ function cleanCommon(s) {
 }
 export function stripTags(s) { return (s || '').replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim(); }
 export function parseLine(raw) { const tagged = cleanCommon(raw); return { tagged, plain: stripTags(tagged) }; }
+
+// ---- length cap: ~10s of speech is roughly ~25 words, so keep every line under ~20-22 words ----
+const MAX_WORDS = 22;        // over this -> re-roll / trim
+const MAX_CHARS = 140;
+const TRIM_WORDS = 20;       // cap when trimming to the first one or two sentences
+export function wordCount(s) { return ((s || '').trim().match(/\S+/g) || []).length; }
+export function isTooLong(plain) { return wordCount(plain) > MAX_WORDS || (plain || '').length > MAX_CHARS; }
+// Keep the first `max` spoken words (bracketed [tags] don't count toward the limit but are preserved).
+function hardCapWords(text, max) {
+  const kept = []; let words = 0;
+  for (const tk of (text.match(/\S+/g) || [])) {
+    kept.push(tk);
+    if (!/^\[[^\]]*\]$/.test(tk)) { words++; if (words >= max) break; }
+  }
+  return kept.join(' ');
+}
+// Trim a tagged line to its first one or two sentences within the cap (keeps tags; re-derives plain).
+// A single over-long sentence is hard-capped by word count so the spoken line still lands under ~10s.
+export function trimLine({ tagged, plain }) {
+  const parts = (tagged || '').match(/[^.!?]+[.!?]+|\S[^.!?]*$/g) || [tagged || ''];
+  let out = '';
+  for (const p of parts) {
+    const cand = out + p;
+    if (out && (wordCount(stripTags(cand)) > TRIM_WORDS || cand.length > MAX_CHARS)) break;
+    out = cand;
+    if (wordCount(stripTags(out)) >= TRIM_WORDS) break;
+  }
+  out = (out.trim() || (tagged || '').trim());
+  if (wordCount(stripTags(out)) > TRIM_WORDS) out = hardCapWords(out, TRIM_WORDS);
+  return { tagged: out.trim(), plain: stripTags(out).trim() || plain };
+}
 
 // ---- escalation: progress (0..1) -> savagery level (1..5), clamped by a cap ----
 export function savageryLevel(progress, cap = 5) {
@@ -143,7 +174,7 @@ async function callAPI(key, userMessage, timeoutMs = 8000, signal) {
         'anthropic-dangerous-direct-browser-access': 'true',
       },
       // temperature is capped at 1.0 by the API (1.1 -> 400); keep it at the max for variety.
-      body: JSON.stringify({ model: MODEL, max_tokens: 150, temperature: 1, system: SYSTEM, messages: [{ role: 'user', content: userMessage }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: 60, temperature: 1, system: SYSTEM, messages: [{ role: 'user', content: userMessage }] }),
     });
   } finally { clearTimeout(timer); if (signal) signal.removeEventListener('abort', onAbort); }
   if (!res.ok) {
@@ -168,6 +199,8 @@ export const AIPep = {
   // aborted, or error). Supports an AbortSignal so an in-flight line can be cancelled.
   async generateLine(ctx, { signal } = {}) {
     if (!this.ready()) return null;
+    const accept = (line) => { seen.add(line.plain); recent.push(line.plain); if (recent.length > RECENT_MAX) recent.shift(); return line; };
+    let overLong = null;   // an over-long candidate held from attempt 0; trimmed as a last resort
     for (let attempt = 0; attempt < 2; attempt++) {     // one retry, then accept rather than go silent
       try {
         const { angle, shape } = pickDelivery();
@@ -175,11 +208,11 @@ export const AIPep = {
         const { tagged, plain } = parseLine(await callAPI(getKey(), userMessage, 8000, signal));
         if (!plain) continue;
         if (seen.has(plain) && attempt === 0) continue;  // dup on first try -> regenerate
-        seen.add(plain);
-        recent.push(plain); if (recent.length > RECENT_MAX) recent.shift();
-        return { tagged, plain };
+        if (isTooLong(plain) && attempt === 0) { overLong = { tagged, plain }; continue; }  // too long -> re-roll once
+        return accept(isTooLong(plain) ? trimLine({ tagged, plain }) : { tagged, plain });
       } catch { if (signal && signal.aborted) return null; }  // superseded -> stop; else retry/exit
     }
+    if (overLong) return accept(trimLine(overLong));   // re-roll exhausted -> trim rather than go silent
     return null;
   },
 

@@ -17,6 +17,7 @@
 let cfg = null;
 let token = 0;            // increments per react(); a stale token means "superseded"
 let currentAbort = null;
+const perfNow = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
 
 // Synth budget by model. v3 (expressive) routinely needs several seconds per sentence, so give it
 // room — the SFX + on-screen caption already gave instant feedback, so the spoken line landing a
@@ -106,10 +107,20 @@ export const Commentary = {
       const text = (cfg.voiceUsesTags && cfg.voiceUsesTags()) ? line.tagged : line.plain;
       const fast = cfg.voiceFast ? !!cfg.voiceFast() : false;
       const budgetMs = opts.budgetMs != null ? opts.budgetMs : synthBudgetMs(fast);
-      // Pass the abort signal so a newer score cancels the in-flight ElevenLabs request too.
-      try { blob = await Promise.race([cfg.synth(text, { signal: ac.signal }), new Promise(r => setTimeout(() => r(null), budgetMs))]); }
-      catch { blob = null; }
-      if (my !== token) return null;             // superseded while synthesizing — never enqueue
+      // Try the synth, retrying ONCE on a thrown error (network / non-OK proxy) within the remaining
+      // budget before dropping to Web Speech — a transient proxy blip shouldn't lose the expressive
+      // voice. A clean timeout (the race resolving null) is NOT an error, so it doesn't retry.
+      const deadline = perfNow() + budgetMs;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const remaining = deadline - perfNow();
+        if (remaining <= 0) break;
+        let errored = false;
+        // Pass the abort signal so a newer score cancels the in-flight ElevenLabs request too.
+        try { blob = await Promise.race([cfg.synth(text, { signal: ac.signal }), new Promise(r => setTimeout(() => r(null), remaining))]); }
+        catch { blob = null; errored = true; }
+        if (my !== token) return null;           // superseded while synthesizing — never enqueue
+        if (blob || !errored) break;             // got audio, or a clean timeout -> stop (fall back)
+      }
     }
     // Hold the spoken audio behind the matched sound: caption + synth already happened above, so the
     // voice lands the instant the sound finishes. A rejected gate just proceeds.

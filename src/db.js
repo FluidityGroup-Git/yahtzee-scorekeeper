@@ -94,3 +94,38 @@ export async function allFinished() {
   for (const g of games) out.push({ game: g, entries: await loadEntries(g.id) });
   return out;
 }
+
+// ---- backup / restore (survive an origin change; data is per-origin in IndexedDB) ----
+const EXPORT_VERSION = 1;
+
+// A JSON-serialisable snapshot of every FINISHED game (with its entries embedded) + the players table.
+// The active in-progress game is intentionally skipped.
+export async function exportData() {
+  const games = (await db.games.where('status').equals('finished').toArray()).sort((a, b) => a.id - b.id);
+  const players = await db.players.toArray();
+  const withEntries = [];
+  for (const g of games) withEntries.push({ ...g, entries: await db.entries.where('gameId').equals(g.id).toArray() });
+  return { version: EXPORT_VERSION, exportedAt: new Date().toISOString(), games: withEntries, players };
+}
+
+// Merge a backup into the DB by primary key (upsert — never wipes existing rows). Each game's entries
+// are replaced (delete-then-insert) so re-importing the same backup is idempotent. Returns a count.
+export async function importData(obj) {
+  if (!obj || typeof obj !== 'object' || !Array.isArray(obj.games)) throw new Error('Invalid backup file');
+  const players = Array.isArray(obj.players) ? obj.players : [];
+  let count = 0;
+  await db.transaction('rw', db.games, db.entries, db.players, async () => {
+    if (players.length) { try { await db.players.bulkPut(players); } catch { /* &name collision — keep existing players */ } }
+    for (const g of obj.games) {
+      const { entries, ...row } = g;
+      if (row.id == null) continue;
+      await db.games.put(row);                                   // upsert by id
+      await db.entries.where('gameId').equals(row.id).delete();  // replace this game's entries
+      if (Array.isArray(entries) && entries.length) {
+        await db.entries.bulkPut(entries.map(({ id, ...e }) => ({ ...e, gameId: row.id })));
+      }
+      count++;
+    }
+  });
+  return { games: count };
+}

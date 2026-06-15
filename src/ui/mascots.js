@@ -132,9 +132,13 @@ function spawnEffect(container, name, hold) {
 }
 
 const reducedMotion = () => (typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)').matches : false);
+const perfNow = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
 
 let stage = null, mainEl = null, cameoEl = null;
 let dismissTimer = null, dismissHandler = null;
+// Minimum on-screen time: react() records `floorUntil`; any dismiss before it is deferred (a single
+// pending dismiss scheduled for the floor) so the pop always plays its full hold before anything removes it.
+let floorUntil = 0, pendingDismissTimer = null;
 
 function removeDismissListeners() {
   if (!dismissHandler) return;
@@ -145,6 +149,8 @@ function removeDismissListeners() {
 }
 function clearStage() {
   if (dismissTimer) { clearTimeout(dismissTimer); dismissTimer = null; }
+  if (pendingDismissTimer) { clearTimeout(pendingDismissTimer); pendingDismissTimer = null; }
+  floorUntil = 0;
   removeDismissListeners();
   if (mainEl) mainEl.innerHTML = '';
   if (cameoEl) { cameoEl.innerHTML = ''; cameoEl.className = 'stage-cameo'; }
@@ -186,6 +192,9 @@ export const Mascots = {
 
     stage.classList.add('show');
 
+    // The hold is a MINIMUM on-screen time: nothing may dismiss the pop before `floorUntil`.
+    floorUntil = perfNow() + (d.hold || 0);
+
     // dismiss on the next mouse move / pointer / key, or a capped max-hold fallback
     const max = Math.min(9000, (d.hold || 1000) + 2500);
     dismissTimer = setTimeout(() => this.dismiss(), max);
@@ -196,11 +205,19 @@ export const Mascots = {
   },
 
   // Fade out + clear (also wired to the AI voice end). Safe to call when nothing is showing.
-  dismiss() {
+  // Honors the minimum on-screen time: a dismiss requested before `floorUntil` is deferred to the
+  // floor (the first early request schedules it; later ones are ignored). `force` bypasses the floor
+  // (used by the deferred fire itself and by reset()).
+  dismiss(force = false) {
     if (!stage) return;
+    const t = perfNow();
+    if (!force && floorUntil && t < floorUntil) {
+      if (pendingDismissTimer == null) pendingDismissTimer = setTimeout(() => this.dismiss(true), Math.max(0, floorUntil - t));
+      return;
+    }
     stage.classList.remove('show');
     clearStage();
   },
 
-  reset() { this.dismiss(); },
+  reset() { this.dismiss(true); },
 };

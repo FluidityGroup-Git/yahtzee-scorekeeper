@@ -1,7 +1,7 @@
 // Dexie persistence round-trips. fake-indexeddb provides an in-memory IndexedDB.
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, createGame, saveActive, flushSaves, finishGame, loadActiveGame, abandonActive, allFinished } from '../src/db.js';
+import { db, createGame, saveActive, flushSaves, finishGame, loadActiveGame, abandonActive, allFinished, exportData, importData } from '../src/db.js';
 import { deriveTurnState } from '../src/game/rules.js';
 
 let n = 0;
@@ -67,6 +67,50 @@ describe('abandonActive', () => {
     expect(loaded.id).toBe(second);                            // only the new game resumes
     expect((await db.games.get(first)).status).toBe('abandoned');
     expect(await allFinished()).toHaveLength(0);               // abandoned excluded from stats
+  });
+});
+
+describe('backup / restore (exportData / importData)', () => {
+  async function makeFinished(seed, winnerName) {
+    const id = await createGame({ startingSeat: 0, players: [], startedAt: 'x' });
+    const game = { id, status: 'active', startingSeat: 0, players: [], startedAt: 'x',
+      entries: [E(0, 'aces', seed, 1), E(1, 'twos', seed + 1, 2)] };
+    await finishGame(game, { result: 'p0', winnerSeat: 0, winnerName, totalsSnapshot: [{ grand: 100 + seed }, { grand: 90 }] });
+    return id;
+  }
+
+  it('round-trips finished games + entries through clear + restore, with matching counts', async () => {
+    await makeFinished(3, 'Dan');
+    await makeFinished(7, 'Amber');
+    const exported = await exportData();
+    expect(exported.version).toBeTruthy();
+    expect(exported.games).toHaveLength(2);
+    expect(exported.games[0].entries).toHaveLength(2);     // entries travel with the game
+
+    await db.games.clear(); await db.entries.clear();
+    expect(await allFinished()).toHaveLength(0);
+
+    const res = await importData(exported);
+    expect(res.games).toBe(2);
+    const restored = await allFinished();
+    expect(restored).toHaveLength(2);
+    expect(restored[0].entries).toHaveLength(2);           // entries came back
+    expect(restored.map(r => r.game.winnerName).sort()).toEqual(['Amber', 'Dan']);
+  });
+
+  it('re-importing the same backup does NOT duplicate (upsert by id)', async () => {
+    await makeFinished(5, 'Dan');
+    const exported = await exportData();
+    await importData(exported);
+    await importData(exported);                            // twice
+    const restored = await allFinished();
+    expect(restored).toHaveLength(1);                      // still one game
+    expect(restored[0].entries).toHaveLength(2);           // entries not duplicated
+  });
+
+  it('rejects a malformed object', async () => {
+    await expect(importData({ nope: true })).rejects.toThrow();
+    await expect(importData(null)).rejects.toThrow();
   });
 });
 

@@ -13,6 +13,7 @@ import { CustomTriggers } from './ui/customTriggers.js';
 import { createGame, saveActive, finishGame, loadActiveGame, abandonActive, allFinished } from './db.js';
 import { computeStats } from './game/stats.js';
 import { openStats, closeStats } from './ui/stats.js';
+import { Mascots } from './ui/mascots.js';
 
 const persist = typeof indexedDB !== 'undefined';   // skip DB where unavailable (e.g. jsdom tests)
 
@@ -208,7 +209,7 @@ function recordEntry(p, k, value) {
   if (persist) saveActive(game);   // debounced autosave
   // Commentary: the SFX above lands immediately and covers generation latency; the voice follows.
   if (over && game.status !== 'finished') onGameOver();
-  else if (isNewScore) fireCommentary(p, k, value, leadBefore);
+  else if (isNewScore) { fireCommentary(p, k, value, leadBefore); fireMascots(p, k, value, leadBefore, crossedBonus); }
 
   // Announce a player's last turn (one base box left) once per player, during an active game.
   if (!over && game.status === 'active' && isNewScore) {
@@ -217,6 +218,7 @@ function recordEntry(p, k, value) {
         lastTurnAnnounced[i] = true;
         showToast('⏳', 'Last turn — ' + nameOf(i), 'one box to go');
         if (soundOn) SoundEngine.play('nice');
+        Mascots.react('lastTurn', { seat: i, level: maxSavagery });
       }
     });
   }
@@ -256,6 +258,9 @@ function onGameOver() {
   showToast('🏆', 'GAME OVER', msg);
   fireCelebration('legendary');
   SoundEngine.play('yahtzee');
+  // Mascots: winner celebrates, loser slumps (both shrug on a tie).
+  if (w.result === 'tie') { Mascots.react('tie', { seat: 0, level: maxSavagery }); Mascots.react('tie', { seat: 1, level: maxSavagery }); }
+  else { const wp = w.result === 'p0' ? 0 : 1; Mascots.react('winGame', { seat: wp, level: maxSavagery }); Mascots.react('loseGame', { seat: 1 - wp, level: maxSavagery }); }
   // Closing commentary: winner hype + loser roast (or roast both on a tie).
   const level = savageryLevel(1, maxSavagery);
   let goCtx;
@@ -372,6 +377,7 @@ async function startGame(seat) {
   prevLeadSeat = null;
   lastTurnAnnounced = [false, false];
   Commentary.cancel();
+  Mascots.reset();
   if (persist) {
     try { await abandonActive(); game.id = await createGame({ startingSeat: seat, players: [{ seat: 0, name: nameOf(0) }, { seat: 1, name: nameOf(1) }], startedAt: game.startedAt }); }
     catch { game.id = undefined; }
@@ -458,6 +464,28 @@ Commentary.configure({
   speak: (t, opts) => Speech.say(t, opts),
   caption: (t, seat) => showCaption(t, seat),
 });
+
+// Mascots: one beside each player; react at the same points commentary fires.
+Mascots.mount({ seat0El: document.getElementById('mascot0'), seat1El: document.getElementById('mascot1') });
+
+// Derive a mascot reaction from the same score values commentary uses. Priority when several could
+// fire on one score: Yahtzee/bonus > takeLead > upperBonus > goodScore.
+function fireMascots(p, k, value, leadBefore, crossedBonus) {
+  const opp = 1 - p, level = maxSavagery;
+  const leadAfter = computeTotals(valuesP(0)).grand - computeTotals(valuesP(1)).grand;
+  const flipped = Math.sign(leadBefore) !== 0 && Math.sign(leadAfter) !== 0 && Math.sign(leadAfter) !== Math.sign(leadBefore);
+  let ev;
+  if (k === 'yahtzeeBonus' && value > 0) ev = 'bonusYahtzee';
+  else if (k === 'yahtzee' && value === 50) ev = 'yahtzee';
+  else if (value === 0) ev = 'scratch';
+  else if (flipped) ev = 'takeLead';          // a score only ever lifts the scorer, so they're the new leader
+  else if (crossedBonus) ev = 'upperBonus';
+  else ev = 'goodScore';
+  Mascots.react(ev, { seat: p, level });
+  // Opponent reactions: cackle at a scratch; jealous double-take at a Yahtzee/bonus or being overtaken.
+  if (ev === 'scratch') Mascots.react('opponentLaugh', { seat: opp, level });
+  else if (ev === 'yahtzee' || ev === 'bonusYahtzee' || ev === 'takeLead') Mascots.react('loseLead', { seat: opp, level });
+}
 
 // Rivalry digest of FINISHED games — reflects the head-to-head *before* the current game.
 async function refreshRivalry() {
@@ -658,7 +686,7 @@ function hydrateSaved(saved) {
   game.status = 'active';
   game.orderCounter = saved.entries.reduce((m, e) => Math.max(m, e.orderIndex), 0);
   (saved.players || []).forEach(p => { if (p && typeof p.seat === 'number') setName(p.seat, p.name); });
-  prevLeadSeat = null; lastTurnAnnounced = [false, false]; Commentary.cancel();
+  prevLeadSeat = null; lastTurnAnnounced = [false, false]; Commentary.cancel(); Mascots.reset();
 }
 async function finalizeLoaded() {
   game.status = 'finished';

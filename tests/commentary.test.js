@@ -1,7 +1,7 @@
 // Commentary orchestrator: per-score trigger, both-player targeting, voice fallback chain,
 // and cancel-in-flight on rapid scores (never stack voices).
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Commentary } from '../src/ui/commentary.js';
+import { Commentary, synthBudgetMs } from '../src/ui/commentary.js';
 
 const ctx = (seat = 1) => ({ scorerSeat: seat, scorer: seat ? 'Amber' : 'Dan' });
 
@@ -36,7 +36,7 @@ describe('voice fallback chain', () => {
     Commentary.configure({ ready: () => true, generate: async () => ({ tagged: '[gleeful] hi', plain: 'hi' }),
       voiceReady: () => true, voiceUsesTags: () => true, synth, playAudio, speak, stopVoice: vi.fn(), caption: vi.fn() });
     await Commentary.react(ctx());
-    expect(synth).toHaveBeenCalledWith('[gleeful] hi');
+    expect(synth.mock.calls[0][0]).toBe('[gleeful] hi'); // tagged line (signal passed as 2nd arg)
     expect(playAudio).toHaveBeenCalled();
     expect(speak).not.toHaveBeenCalled();
   });
@@ -60,7 +60,54 @@ describe('voice fallback chain', () => {
   });
 });
 
+describe('synth budget is model-aware', () => {
+  it('gives v3 a much longer budget than the fast models', () => {
+    expect(synthBudgetMs(false)).toBeGreaterThan(synthBudgetMs(true)); // v3 vs fast
+    expect(synthBudgetMs(false)).toBeGreaterThanOrEqual(9000);
+    expect(synthBudgetMs(true)).toBeLessThanOrEqual(3000);
+  });
+
+  it('waits past 3.5s for a v3 line instead of bailing to Web Speech', async () => {
+    let resolveSynth;
+    const synth = vi.fn(() => new Promise(r => { resolveSynth = r; }));
+    const playAudio = vi.fn(async () => true);
+    const speak = vi.fn();
+    Commentary.configure({ ready: () => true, generate: async () => ({ tagged: '[low] hi', plain: 'hi' }),
+      voiceReady: () => true, voiceUsesTags: () => true, voiceFast: () => false, synth, playAudio, speak,
+      stopVoice: vi.fn(), caption: vi.fn() });
+    const p = Commentary.react({ scorerSeat: 1 });        // model-aware budget (9s), no override
+    await new Promise(r => setTimeout(r, 60));             // well past the old 3.5s bail point
+    expect(speak).not.toHaveBeenCalled();                 // still waiting for v3, not fallen back
+    resolveSynth({ size: 1 });
+    await p;
+    expect(playAudio).toHaveBeenCalled();
+    expect(speak).not.toHaveBeenCalled();
+  });
+});
+
 describe('cancel-in-flight (never stack voices)', () => {
+  it('a superseded synth never plays its audio', async () => {
+    const gen = vi.fn()
+      .mockResolvedValueOnce({ tagged: 't1', plain: 'p1' })
+      .mockReturnValue(new Promise(() => {}));            // second react hangs in generate
+    let resolveSynth;
+    const synth = vi.fn(() => new Promise(r => { resolveSynth = r; }));
+    const playAudio = vi.fn(async () => true);
+    const speak = vi.fn();
+    Commentary.configure({ ready: () => true, generate: gen, voiceReady: () => true,
+      voiceUsesTags: () => true, voiceFast: () => false, synth, playAudio, speak, stopVoice: vi.fn(), caption: vi.fn() });
+
+    const p1 = Commentary.react({ scorerSeat: 0 });        // reaches synth#1 (pending)
+    await new Promise(r => setTimeout(r, 0));
+    expect(synth).toHaveBeenCalledTimes(1);
+    Commentary.react({ scorerSeat: 1 });                   // supersede: token++ + abort #1
+    resolveSynth({ size: 1 });                             // stale synth resolves late
+    await p1;
+    expect(playAudio).not.toHaveBeenCalled();
+    expect(speak).not.toHaveBeenCalled();
+  });
+
+
   it('a newer score cancels the in-flight one; only the latest speaks', async () => {
     const resolvers = [];
     const speak = vi.fn();

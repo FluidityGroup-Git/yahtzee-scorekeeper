@@ -41,11 +41,15 @@ export const Voice = {
   ready() { return cfg.on && !!cfg.voiceId; },
   // Only v3 performs bracketed audio tags; Flash/v2 would read them literally, so send plain text.
   usesTags() { return cfg.model === 'eleven_v3'; },
+  // Fast models (Flash v2.5 / v2) return quickly; v3 is expressive but slow. Drives the synth budget.
+  isFast() { return cfg.model !== 'eleven_v3'; },
 
   // Synthesize a (possibly tagged) line via the proxy. Returns an mp3 Blob or throws.
-  async make(text) {
+  // A signal lets a superseded commentary line abort the in-flight request.
+  async make(text, { signal } = {}) {
     const res = await fetch('/api/tts', {
       method: 'POST',
+      signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text, voiceId: cfg.voiceId, modelId: cfg.model, voiceSettings: voiceSettings() }),
     });

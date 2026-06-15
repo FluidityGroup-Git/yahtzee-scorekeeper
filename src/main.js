@@ -40,7 +40,8 @@ const device = document.getElementById('device');
 // ---- build the scorecard ----
 function catCell(c) {
   const die = c.face ? dieHTML(c.face) : '';
-  return `<div class="cat">${die}<div><div class="catname">${c.name}</div><div class="cathint">${c.hint}</div></div></div>`;
+  const hint = (c.hint || '').replace(/"/g, '');   // odds/help move to a tooltip to declutter the row
+  return `<div class="cat" title="${hint}">${die}<span class="catname">${c.name}</span></div>`;
 }
 function buildGrid(list, el) {
   el.innerHTML = list.map(c => `<div class="row" data-key="${c.key}">${catCell(c)}
@@ -101,9 +102,10 @@ function refresh() {
   // cells
   document.querySelectorAll('.cell[data-key]').forEach(cell => {
     const p = +cell.dataset.p, k = cell.dataset.key, d = displayCell(p, k);
-    cell.classList.remove('empty', 'zero', 'filled', 'lastbox');
+    cell.classList.remove('empty', 'zero', 'filled', 'lastbox', 'open-active', 'open-idle');
     if (d) { cell.innerHTML = d.value + `<span class="ord">${d.order}</span>`; cell.classList.add('filled'); if (d.value === 0) cell.classList.add('zero'); }
-    else { cell.innerHTML = ''; cell.classList.add('empty'); }
+    // open cells: only the player-to-move's empties glow; the idle player's recede.
+    else { cell.innerHTML = ''; cell.classList.add('empty', (p === active && game.status === 'active') ? 'open-active' : 'open-idle'); }
   });
   // final-box flag: 12 of 13 base boxes filled
   [0, 1].forEach(p => {

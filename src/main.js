@@ -11,6 +11,7 @@ import { Commentary } from './ui/commentary.js';
 import { buildContext } from './game/commentaryContext.js';
 import { CustomTriggers } from './ui/customTriggers.js';
 import { createGame, saveActive, finishGame, loadActiveGame, abandonActive } from './db.js';
+import { openStats, closeStats } from './ui/stats.js';
 
 const persist = typeof indexedDB !== 'undefined';   // skip DB where unavailable (e.g. jsdom tests)
 
@@ -386,6 +387,8 @@ function togglePep(on = !pepOn) {
 }
 document.getElementById('pepBtn').addEventListener('click', () => togglePep());
 document.getElementById('setBtn').addEventListener('click', openSettings);
+document.getElementById('statsBtn').addEventListener('click', () => { openStats().catch(() => {}); });
+document.getElementById('statsBack').addEventListener('click', closeStats);
 document.getElementById('newBtn').addEventListener('click', () => {
   if (game.entries.length > 0 && !confirm('Start a new game? Current scores clear.')) return;
   showSetup();

@@ -262,6 +262,30 @@ header{background:var(--grape);border-bottom:3px solid var(--ink);padding:8px 14
 .toast .pts{font-size:15px;font-weight:600;margin-top:4px;color:var(--grape);}
 .toast .emo{font-size:30px;margin-bottom:4px;}
 
+/* stats screen */
+.statsscreen{position:fixed;inset:0;z-index:80;background-color:#FFE3A8;
+  background-image:radial-gradient(var(--ink) 1.4px, transparent 1.4px);background-size:22px 22px;background-position:-11px -11px;
+  display:none;flex-direction:column;}
+.statsscreen.open{display:flex;}
+.statshead{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;background:var(--grape);border-bottom:3px solid var(--ink);}
+.statstitle{font-size:20px;font-weight:700;color:#fff;}
+.statsbody{flex:1;overflow:auto;padding:16px;max-width:1040px;width:100%;margin:0 auto;}
+.statcards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px;}
+.statcard{background:#fff;border:2.5px solid var(--ink);border-radius:14px;padding:11px 10px;box-shadow:3px 3px 0 var(--ink);text-align:center;}
+.statcard .sv{font-family:"Space Mono",monospace;font-size:18px;font-weight:700;line-height:1.15;word-break:break-word;}
+.statcard .sl{font-size:10.5px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-top:4px;}
+.chartgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;}
+.chartbox{background:#fff;border:2.5px solid var(--ink);border-radius:14px;padding:12px;box-shadow:3px 3px 0 var(--ink);}
+.chartbox.wide{grid-column:1 / -1;}
+.ct{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);margin-bottom:8px;}
+.cwrap{position:relative;height:200px;}
+.chartbox.wide .cwrap{height:230px;}
+.statsempty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:40px;}
+.se-glyph{font-size:46px;}
+.se-t{font-size:21px;font-weight:700;}
+.se-s{font-size:13px;color:var(--ink-soft);}
+@media (max-width:720px){ .statcards{grid-template-columns:repeat(2,1fr);} .chartgrid{grid-template-columns:1fr;} .chartbox.wide{grid-column:auto;} }
+
 /* portrait / narrow notice (phone layout is a later pass) */
 .rotate-notice{display:none;}
 .rn-glyph{font-size:54px;}

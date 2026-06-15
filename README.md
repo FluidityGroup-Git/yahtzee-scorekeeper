@@ -70,7 +70,11 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
       already complete is finalized instead of resumed. Finished games kept for History/Stats.
 - [ ] Phase 4 — New game / names, game-over finalize + save record.
 - [ ] Phase 5 — History screen.
-- [ ] Phase 6 / item F — Stats screen (Chart.js): donut, bars, lines, histogram, fun counters.
+- [x] **Phase 6 / item F** — Stats screen (header **Stats** button → overlay, **Back to game**, doesn't
+      disturb an in-progress game). Pure `src/game/stats.js` `computeStats(allFinished())`; Chart.js
+      (bundled + precached, loaded on open) renders a win-share donut, avg-by-category grouped bar,
+      grand-total-over-time line, and final-score histogram, plus header + fun-counter cards and a
+      friendly empty state. Reduced-motion turns Chart animation off.
 - [ ] Phase 7 — Polish: vendored fonts, accessibility, JSON export backed by Dexie, offline verify.
 
 Run `npm test` for the suite. To curate real audio, drop clips in `public/sounds/` (see the

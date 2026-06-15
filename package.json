@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
+    "chart.js": "^4.5.1",
     "dexie": "^4.0.0"
   }
 }

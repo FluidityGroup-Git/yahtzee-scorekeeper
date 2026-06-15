@@ -5,9 +5,30 @@ import { UPPER_KEYS, META } from './categories.js';
 
 const BIG_SCRATCH = ['yahtzee', 'largeStraight', 'fourKind', 'fullHouse', 'smallStraight'];
 
+// Compact rivalry summary from a computeStats() result, for the two current player names.
+// Returns null when there's no history. Reads only from the computeStats shape.
+export function rivalryDigest(stats, name0, name1) {
+  if (!stats || !stats.totalGames) return null;
+  const w = (stats.headToHead && stats.headToHead.winsByName) || {};
+  const c = stats.counters || {};
+  const leader = (w[name0] || 0) > (w[name1] || 0) ? name0 : (w[name1] || 0) > (w[name0] || 0) ? name1 : null;
+  return {
+    totalGames: stats.totalGames,
+    wins: { [name0]: w[name0] || 0, [name1]: w[name1] || 0 },
+    ties: (stats.headToHead && stats.headToHead.ties) || 0,
+    leader,
+    streak: stats.streak && stats.streak.length ? { name: stats.streak.name, length: stats.streak.length } : null,
+    lastWinner: stats.lastWinner,
+    avg: { [name0]: (stats.avgScore || {})[name0] || 0, [name1]: (stats.avgScore || {})[name1] || 0 },
+    bestGame: c.bestGame && c.bestGame.name ? { name: c.bestGame.name, score: c.bestGame.score } : null,
+    closestMargin: c.closestGame ? c.closestGame.margin : null,
+    biggestBlowout: c.biggestBlowout && c.biggestBlowout.winner ? { winner: c.biggestBlowout.winner, margin: c.biggestBlowout.margin } : null,
+  };
+}
+
 // args: { entries, scorerSeat, names:[n0,n1], lastCategory, lastValue, leadBefore (g0-g1 before this score),
-//         level, profanity }
-export function buildContext({ entries, scorerSeat, names, lastCategory, lastValue, leadBefore = null, level = 1, profanity = false }) {
+//         level, profanity, rivalry }
+export function buildContext({ entries, scorerSeat, names, lastCategory, lastValue, leadBefore = null, level = 1, profanity = false, rivalry = null }) {
   const s = scorerSeat, o = 1 - s;
   const v = [valuesFor(entries, 0), valuesFor(entries, 1)];
   const t = [computeTotals(v[0]), computeTotals(v[1])];
@@ -88,6 +109,7 @@ export function buildContext({ entries, scorerSeat, names, lastCategory, lastVal
     scorerBonusDist: bonusDist(s), scorerBonusSecured: bonusDist(s) === 0 && t[s].upper > 0,
     opponentBonusDist: bonusDist(o), opponentBonusSecured: bonusDist(o) === 0 && t[o].upper > 0,
     scorerBoxesLeft: boxesLeft(s), opponentBoxesLeft: boxesLeft(o),
-    needToWin, jabs, trends, scorerScratchStreak, level, profanity,
+    scorerLastTurn: boxesLeft(s) === 1, opponentLastTurn: boxesLeft(o) === 1,
+    needToWin, jabs, trends, scorerScratchStreak, level, profanity, rivalry,
   };
 }

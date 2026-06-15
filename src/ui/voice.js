@@ -63,18 +63,23 @@ export const Voice = {
   },
 
   // Play an mp3 Blob. Returns true if playback started, false otherwise (caller falls back).
-  // Stops any currently-playing clip first so commentary voices never overlap.
-  async play(blob) {
+  // onEnded fires when the clip ENDS or errors (so the playback gate never stalls). Stops any
+  // currently-playing clip first so commentary voices never overlap.
+  async play(blob, { onEnded } = {}) {
     try {
       this.stop();
       const url = URL.createObjectURL(blob);
       const a = new Audio(url);
       currentAudio = a;
-      a.addEventListener('ended', () => { URL.revokeObjectURL(url); if (currentAudio === a) currentAudio = null; }, { once: true });
+      let done = false;
+      const finish = () => { if (done) return; done = true; URL.revokeObjectURL(url); if (currentAudio === a) currentAudio = null; if (onEnded) onEnded(); };
+      a.addEventListener('ended', finish, { once: true });
+      a.addEventListener('error', finish, { once: true });
       await a.play();
       return true;
     } catch { return false; }
   },
+  // Deliberate stop — must NOT call onEnded (a manual stop must not advance the queue).
   stop() { if (currentAudio) { try { currentAudio.pause(); } catch { /* ignore */ } currentAudio = null; } },
 
   // Settings "Test voice" button.

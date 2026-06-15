@@ -11,14 +11,17 @@ const MODEL = 'claude-haiku-4-5-20251001';   // fast + cheap ($1/$5 per 1M token
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 
 const SYSTEM = [
-  'You are the live, ringside color commentator for a fast, friendly two-player Yahtzee game between Dan and Amber.',
-  'React to the score you are told about. You roast BOTH players — whoever the moment calls for, and you may take a side. Mostly comedic roast, with the occasional sincere or witty beat.',
-  'Each line you will be assigned a random DELIVERY PERSONA and a SENTENCE SHAPE — commit to them fully and lean in hard; they are your main source of variety, so do NOT fall back into a recognizable house voice.',
-  'Use the facts when they are funny — names, totals, what someone needs, a weak number, a cold streak — but you may also just react to the vibe or fixate on one absurd detail. Do not recite stats dutifully.',
-  'Vary the length a lot: sometimes three words, sometimes a full sentence. Avoid your own clichés and the structures of the recent lines you are shown.',
-  'You may include at most one or two ElevenLabs v3 performance tags in square brackets, e.g. [dryly], [gleeful], [low], [laughs], to color delivery.',
-  'SAVAGERY LADDER (you will be told the level, 1 to 5): L1 cheeky and light. L2 sharper sarcasm. L3 gallows humor. L4 properly savage. L5 peak comedic cruelty.',
-  'HARD RULES at EVERY level: no slurs; nothing about protected characteristics (race, gender, religion, orientation, disability); no jabs at appearance, weight, or real insecurities; no sexual content. Roast their Yahtzee play and competence only — affection underneath.',
+  'You are the live, ringside color commentator for a fast, friendly two-player Yahtzee game between Dan and Amber. Your job is to be genuinely funny, not just snarky.',
+  'React to the score you are told about. Roast EITHER player as the moment demands, and feel free to pick a side. The goal is laughs: surprise, specificity, a sharp turn of phrase. Land an actual joke, not a generic insult.',
+  'Each line gets a random DELIVERY PERSONA and a SENTENCE SHAPE. Commit to them completely; they are your engine of variety, so never settle into one recognizable house voice.',
+  'Build the joke out of the SPECIFIC situation (the exact number, the box they wasted, the gap, a cold streak) but twist it: an unexpected comparison, a vivid image, misdirection, escalating absurdity, a little wordplay. Do not flatly recite the stats.',
+  'Craft matters: keep it tight, cut filler, put the funniest word last. Vary length wildly, sometimes three words, sometimes one full sentence.',
+  'Do NOT reuse a joke, comparison, metaphor, or punchline structure from the recent lines you are shown; find a genuinely different angle each time. You MAY call back to an earlier bit only if the callback itself is the joke.',
+  'When given RIVALRY HISTORY (past games between them), you may weave it in for extra sting or a callback (a losing streak, a personal best they are nowhere near, how last game went) but only when it sharpens the joke; never just recite it.',
+  'When told it is a players LAST TURN, treat it as a final-box moment: heighten the stakes, build tension or mock the pressure.',
+  'You may use at most one or two ElevenLabs v3 performance tags in square brackets, e.g. [dryly], [gleeful], [low], [laughs], to color delivery.',
+  'SAVAGERY LADDER (you will be told the level, 1 to 5): L1 cheeky and light. L2 sharper sarcasm. L3 gallows humor. L4 properly savage. L5 peak comedic cruelty, but funny first, cruel second.',
+  'HARD RULES at EVERY level: no slurs; nothing about protected characteristics (race, gender, religion, orientation, disability); no jabs at appearance, weight, or real insecurities; no sexual content. Roast their Yahtzee play and competence only, affection underneath.',
   'Output ONE spoken line (occasionally two short ones for a big moment). No emoji, no stage directions in parentheses, no quotation marks around the line.',
 ].join(' ');
 
@@ -36,6 +39,7 @@ export const SHAPES = [
   'a rhetorical question', 'a fake news headline', 'a single brutal metaphor', 'an overheard aside',
 ];
 
+const RECENT_MAX = 6;
 let enabled = false;
 const seen = new Set();
 const recent = [];        // last few generated lines (self-memory, threaded into the prompt)
@@ -73,6 +77,17 @@ export function savageryLevel(progress, cap = 5) {
   return Math.min(lvl, c);
 }
 
+function rivalryLine(r) {
+  const names = Object.keys(r.wins || {});
+  const parts = [];
+  if (names.length === 2) parts.push(`Career: ${names[0]} ${r.wins[names[0]]}-${r.wins[names[1]]} ${names[1]}${r.ties ? ` (${r.ties} tie${r.ties > 1 ? 's' : ''})` : ''} over ${r.totalGames} games.`);
+  if (r.streak && r.streak.name && r.streak.length >= 2) parts.push(`${r.streak.name} has won the last ${r.streak.length}.`);
+  if (r.lastWinner) parts.push(`Last game went to ${r.lastWinner}.`);
+  if (r.avg && names.length === 2) parts.push(`Career averages: ${names[0]} ${r.avg[names[0]]}, ${names[1]} ${r.avg[names[1]]}.`);
+  if (r.bestGame && r.bestGame.name) parts.push(`Record game: ${r.bestGame.name} ${r.bestGame.score}.`);
+  return 'RIVALRY HISTORY (reference occasionally for spice, do NOT force it every line): ' + parts.join(' ');
+}
+
 export function buildUserMessage(c, { angle, shape, recent: recentLines } = {}) {
   const lvl = c.level || 1;
   const L = [`Savagery level ${lvl} of 5.`, c.profanity ? 'Mild profanity allowed for comedic punch.' : 'Keep it clean — no profanity.'];
@@ -83,6 +98,7 @@ export function buildUserMessage(c, { angle, shape, recent: recentLines } = {}) 
     if (c.tie) L.push(`GAME OVER — a TIE at ${c.winScore}. Roast both Dan and Amber.`);
     else L.push(`GAME OVER. ${c.winner} beat ${c.loser} ${c.winScore} to ${c.loseScore}.`);
     L.push('Give the closing line: hype the winner and roast the loser (or roast both on a tie).');
+    if (c.rivalry) L.push(rivalryLine(c.rivalry));
     recentTail();
     return L.join(' ');
   }
@@ -99,6 +115,9 @@ export function buildUserMessage(c, { angle, shape, recent: recentLines } = {}) 
   if (c.needToWin) L.push(c.needToWin);
   if (c.trends && c.trends.length) L.push('Trends: ' + c.trends.join('; ') + '.');
   if (c.jabs && c.jabs.length) L.push('Jab fodder: ' + c.jabs.join('; ') + '.');
+  if (c.scorerLastTurn) L.push(`This is ${c.scorer}s LAST TURN, final box.`);
+  else if (c.opponentLastTurn) L.push(`${c.opponent} is down to their LAST box.`);
+  if (c.rivalry) L.push(rivalryLine(c.rivalry));
   recentTail();
   L.push('Now give one fresh line — commit to the persona and shape above, and surprise me.');
   return L.join(' ');
@@ -121,7 +140,7 @@ async function callAPI(key, userMessage, timeoutMs = 8000, signal) {
         'anthropic-dangerous-direct-browser-access': 'true',
       },
       // temperature is capped at 1.0 by the API (1.1 -> 400); keep it at the max for variety.
-      body: JSON.stringify({ model: MODEL, max_tokens: 110, temperature: 1, system: SYSTEM, messages: [{ role: 'user', content: userMessage }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: 150, temperature: 1, system: SYSTEM, messages: [{ role: 'user', content: userMessage }] }),
     });
   } finally { clearTimeout(timer); if (signal) signal.removeEventListener('abort', onAbort); }
   if (!res.ok) {
@@ -146,15 +165,19 @@ export const AIPep = {
   // aborted, or error). Supports an AbortSignal so an in-flight line can be cancelled.
   async generateLine(ctx, { signal } = {}) {
     if (!this.ready()) return null;
-    try {
-      const { angle, shape } = pickDelivery();
-      const userMessage = buildUserMessage(ctx, { angle, shape, recent: recent.slice() });
-      const { tagged, plain } = parseLine(await callAPI(getKey(), userMessage, 8000, signal));
-      if (!plain || seen.has(plain)) return null;   // keep lines unique within the session
-      seen.add(plain);
-      recent.push(plain); if (recent.length > 4) recent.shift();   // self-memory for callbacks / anti-repetition
-      return { tagged, plain };
-    } catch { return null; }
+    for (let attempt = 0; attempt < 2; attempt++) {     // one retry, then accept rather than go silent
+      try {
+        const { angle, shape } = pickDelivery();
+        const userMessage = buildUserMessage(ctx, { angle, shape, recent: recent.slice() });
+        const { tagged, plain } = parseLine(await callAPI(getKey(), userMessage, 8000, signal));
+        if (!plain) continue;
+        if (seen.has(plain) && attempt === 0) continue;  // dup on first try -> regenerate
+        seen.add(plain);
+        recent.push(plain); if (recent.length > RECENT_MAX) recent.shift();
+        return { tagged, plain };
+      } catch { if (signal && signal.aborted) return null; }  // superseded -> stop; else retry/exit
+    }
+    return null;
   },
 
   // One-off probe for the settings "Test" button.

@@ -1,10 +1,45 @@
 // Pure commentary-context builder: comeback detection + the new situational fields.
 import { describe, it, expect } from 'vitest';
-import { buildContext } from '../src/game/commentaryContext.js';
+import { buildContext, rivalryDigest } from '../src/game/commentaryContext.js';
 
 const NAMES = ['Dan', 'Amber'];
 let n = 0;
 const E = (playerId, category, value) => ({ playerId, category, value, orderIndex: ++n, recordedAt: '' });
+
+describe('rivalryDigest', () => {
+  const stats = {
+    totalGames: 9, headToHead: { winsByName: { Dan: 3, Amber: 5 }, ties: 1 },
+    streak: { name: 'Amber', length: 2 }, lastWinner: 'Amber', avgScore: { Dan: 95, Amber: 162 },
+    counters: { bestGame: { name: 'Amber', score: 286 }, closestGame: { margin: 4, winner: 'Dan' }, biggestBlowout: { winner: 'Amber', margin: 120 } },
+  };
+  it('summarizes record / leader / streak / averages from a computeStats shape', () => {
+    const d = rivalryDigest(stats, 'Dan', 'Amber');
+    expect(d.totalGames).toBe(9);
+    expect(d.wins).toEqual({ Dan: 3, Amber: 5 });
+    expect(d.ties).toBe(1);
+    expect(d.leader).toBe('Amber');
+    expect(d.streak).toEqual({ name: 'Amber', length: 2 });
+    expect(d.lastWinner).toBe('Amber');
+    expect(d.avg).toEqual({ Dan: 95, Amber: 162 });
+    expect(d.bestGame).toEqual({ name: 'Amber', score: 286 });
+    expect(d.closestMargin).toBe(4);
+    expect(d.biggestBlowout).toEqual({ winner: 'Amber', margin: 120 });
+  });
+  it('returns null when there is no history', () => {
+    expect(rivalryDigest(null, 'Dan', 'Amber')).toBeNull();
+    expect(rivalryDigest({ totalGames: 0 }, 'Dan', 'Amber')).toBeNull();
+  });
+});
+
+describe('last-turn flags', () => {
+  it('sets scorerLastTurn when the scorer has one base box left', () => {
+    const BASE12 = ['aces', 'twos', 'threes', 'fours', 'fives', 'sixes', 'threeKind', 'fourKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yahtzee'];
+    const entries = BASE12.map(c => E(0, c, 5));
+    const c = buildContext({ entries, scorerSeat: 0, names: NAMES, lastCategory: 'yahtzee', lastValue: 5, leadBefore: null });
+    expect(c.scorerLastTurn).toBe(true);
+    expect(c.opponentLastTurn).toBe(false);
+  });
+});
 
 describe('comeback detection', () => {
   it('flags when the trailing player TAKES the lead', () => {

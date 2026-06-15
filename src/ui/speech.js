@@ -17,11 +17,12 @@ function pickVoice() {
     || voices.find(v => /^en/i.test(v.lang))
     || voices[0];
 }
-function utter(text, { rate = 1, pitch = 1.05, volume = 1 } = {}) {
-  if (!supported || !text) return;
+function utter(text, { rate = 1, pitch = 1.05, volume = 1, onEnd } = {}) {
+  if (!supported || !text) { if (onEnd) onEnd(); return; }   // still settle the gate when unsupported
   const u = new SpeechSynthesisUtterance(text);
   if (chosenVoice) u.voice = chosenVoice;
   u.rate = rate; u.pitch = pitch; u.volume = volume;
+  if (onEnd) { let done = false; const fin = () => { if (done) return; done = true; onEnd(); }; u.addEventListener('end', fin); u.addEventListener('error', fin); }
   speechSynthesis.speak(u);
 }
 
@@ -36,7 +37,8 @@ export const Speech = {
   },
   setEnabled(on) { enabled = on; if (!on) this.stop(); },
   isEnabled() { return enabled; },
-  // Speak a line now, cancelling any current utterance (never stack).
-  say(text, opts) { if (!enabled || !supported) return; speechSynthesis.cancel(); utter(text, opts); },
+  // Speak a line now, cancelling any current utterance (never stack). onEnd settles the gate,
+  // even when speech is disabled/unsupported.
+  say(text, { onEnd } = {}) { if (!enabled || !supported) { if (onEnd) onEnd(); return; } speechSynthesis.cancel(); utter(text, { onEnd }); },
   stop() { if (supported) speechSynthesis.cancel(); },
 };

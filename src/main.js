@@ -8,9 +8,10 @@ import { Speech } from './ui/speech.js';
 import { AIPep, savageryLevel } from './ui/aiPep.js';
 import { Voice } from './ui/voice.js';
 import { Commentary } from './ui/commentary.js';
-import { buildContext } from './game/commentaryContext.js';
+import { buildContext, rivalryDigest } from './game/commentaryContext.js';
 import { CustomTriggers } from './ui/customTriggers.js';
-import { createGame, saveActive, finishGame, loadActiveGame, abandonActive } from './db.js';
+import { createGame, saveActive, finishGame, loadActiveGame, abandonActive, allFinished } from './db.js';
+import { computeStats } from './game/stats.js';
 import { openStats, closeStats } from './ui/stats.js';
 
 const persist = typeof indexedDB !== 'undefined';   // skip DB where unavailable (e.g. jsdom tests)
@@ -85,6 +86,8 @@ function setTotal(el, target) {
   countAnim.set(el, requestAnimationFrame(step));
 }
 let prevLeadSeat = null;   // for the comeback flash
+let lastTurnAnnounced = [false, false];   // "last turn" announced once per player per game
+let rivalry = null;        // digest of FINISHED games before the current one (refreshed per game)
 
 // Display value + order badge for a cell (bonus accumulates across rows).
 function displayCell(p, k) {
@@ -206,6 +209,17 @@ function recordEntry(p, k, value) {
   // Commentary: the SFX above lands immediately and covers generation latency; the voice follows.
   if (over && game.status !== 'finished') onGameOver();
   else if (isNewScore) fireCommentary(p, k, value, leadBefore);
+
+  // Announce a player's last turn (one base box left) once per player, during an active game.
+  if (!over && game.status === 'active' && isNewScore) {
+    [0, 1].forEach(i => {
+      if (filledBaseCount(valuesP(i)) === 12 && !lastTurnAnnounced[i]) {
+        lastTurnAnnounced[i] = true;
+        showToast('⏳', 'Last turn — ' + nameOf(i), 'one box to go');
+        if (soundOn) SoundEngine.play('nice');
+      }
+    });
+  }
 }
 
 function clearScore(p, k) {
@@ -246,12 +260,12 @@ function onGameOver() {
   const level = savageryLevel(1, maxSavagery);
   let goCtx;
   if (w.result === 'tie') {
-    goCtx = { gameOver: true, tie: true, winScore: w.totals[0].grand, loseScore: w.totals[1].grand, level, profanity: profanityOn,
+    goCtx = { gameOver: true, tie: true, winScore: w.totals[0].grand, loseScore: w.totals[1].grand, level, profanity: profanityOn, rivalry,
       scorerSeat: 0, scorer: nameOf(0), opponent: nameOf(1), scorerTotal: w.totals[0].grand, opponentTotal: w.totals[1].grand, leader: null, margin: 0 };
   } else {
     const wp = w.result === 'p0' ? 0 : 1;
     goCtx = { gameOver: true, winner: nameOf(wp), loser: nameOf(1 - wp), winScore: w.totals[wp].grand, loseScore: w.totals[1 - wp].grand,
-      level, profanity: profanityOn, scorerSeat: wp, scorer: nameOf(wp), opponent: nameOf(1 - wp),
+      level, profanity: profanityOn, rivalry, scorerSeat: wp, scorer: nameOf(wp), opponent: nameOf(1 - wp),
       scorerTotal: w.totals[wp].grand, opponentTotal: w.totals[1 - wp].grand, leader: nameOf(wp), margin: w.totals[wp].grand - w.totals[1 - wp].grand };
   }
   Commentary.react(goCtx);
@@ -356,6 +370,7 @@ async function startGame(seat) {
   game.startingSeat = seat; game.entries = []; game.orderCounter = 0; game.status = 'active';
   game.startedAt = new Date().toISOString();
   prevLeadSeat = null;
+  lastTurnAnnounced = [false, false];
   Commentary.cancel();
   if (persist) {
     try { await abandonActive(); game.id = await createGame({ startingSeat: seat, players: [{ seat: 0, name: nameOf(0) }, { seat: 1, name: nameOf(1) }], startedAt: game.startedAt }); }
@@ -363,6 +378,7 @@ async function startGame(seat) {
   }
   setupScrim.classList.remove('open');
   refresh();
+  refreshRivalry();   // rivalry of finished games before this one
 }
 function setName(p, v) {
   const val = (v || '').trim() || ('Player ' + (p + 1));
@@ -437,11 +453,18 @@ Commentary.configure({
   voiceUsesTags: () => Voice.usesTags(),
   voiceFast: () => Voice.isFast(),
   synth: (t, opts) => Voice.make(t, opts),
-  playAudio: (b) => Voice.play(b),
+  playAudio: (b, opts) => Voice.play(b, opts),
   stopVoice: () => { Voice.stop(); Speech.stop(); },
-  speak: (t) => Speech.say(t),
+  speak: (t, opts) => Speech.say(t, opts),
   caption: (t, seat) => showCaption(t, seat),
 });
+
+// Rivalry digest of FINISHED games — reflects the head-to-head *before* the current game.
+async function refreshRivalry() {
+  if (!persist) { rivalry = null; return; }
+  try { rivalry = rivalryDigest(computeStats(await allFinished()), nameOf(0), nameOf(1)); }
+  catch { rivalry = null; }
+}
 
 // Fire a commentary line for a new score by either player.
 function fireCommentary(scorerSeat, category, value, leadBefore) {
@@ -449,7 +472,7 @@ function fireCommentary(scorerSeat, category, value, leadBefore) {
   const ctx = buildContext({
     entries: game.entries, scorerSeat, names: [nameOf(0), nameOf(1)],
     lastCategory: category, lastValue: category === 'yahtzeeBonus' ? 100 : value,
-    leadBefore, level: savageryLevel(progress, maxSavagery), profanity: profanityOn,
+    leadBefore, level: savageryLevel(progress, maxSavagery), profanity: profanityOn, rivalry,
   });
   Commentary.react(ctx);
 }
@@ -635,7 +658,7 @@ function hydrateSaved(saved) {
   game.status = 'active';
   game.orderCounter = saved.entries.reduce((m, e) => Math.max(m, e.orderIndex), 0);
   (saved.players || []).forEach(p => { if (p && typeof p.seat === 'number') setName(p.seat, p.name); });
-  prevLeadSeat = null; Commentary.cancel();
+  prevLeadSeat = null; lastTurnAnnounced = [false, false]; Commentary.cancel();
 }
 async function finalizeLoaded() {
   game.status = 'finished';
@@ -652,11 +675,13 @@ async function boot() {
         hydrateSaved(saved);
         if (isGameOver(game.entries)) await finalizeLoaded();   // already complete -> finalize, don't resume
         else refresh();                                          // resume exactly where we left off
+        refreshRivalry();
         return;
       }
     } catch { /* fall through to a fresh setup */ }
   }
   refresh();
   showSetup();
+  refreshRivalry();
 }
 boot();

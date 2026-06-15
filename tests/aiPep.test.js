@@ -74,16 +74,18 @@ describe('generateLine', () => {
     expect(opts.headers['anthropic-version']).toBe('2023-06-01');
     const body = JSON.parse(opts.body);
     expect(body.model).toBe('claude-haiku-4-5-20251001');
-    expect(body.system).toMatch(/roast BOTH players/);
+    expect(body.system).toMatch(/Roast EITHER player/);
     expect(body.system).not.toMatch(/always (the )?hero/i);
     expect(body.messages[0].content).toMatch(/COMEBACK/);
   });
 
-  it('dedupes — a repeated line returns null the second time', async () => {
+  it('a verbatim duplicate retries, then accepts rather than going silent', async () => {
     stubFetch('Dan, that is a personality choice, not a strategy.');
     AIPep.setKey('sk-ant-k'); AIPep.setEnabled(true);
     expect((await AIPep.generateLine(baseCtx())).plain).toBeTruthy();
-    expect(await AIPep.generateLine(baseCtx())).toBeNull();
+    const second = await AIPep.generateLine(baseCtx());   // dup on attempt 0 -> retry -> accept (no silent null)
+    expect(second).not.toBeNull();
+    expect(second.plain).toBeTruthy();
   });
 
   it('returns null when aborted', async () => {
@@ -115,5 +117,42 @@ describe('spontaneity: rotating angle + self-memory', () => {
     expect((await AIPep.generateLine(baseCtx())).plain).toBe('First witty line here.');
     await AIPep.generateLine(baseCtx());
     expect(JSON.parse(calls[1].opts.body).messages[0].content).toContain('First witty line here.');
+  });
+});
+
+describe('no truncation, no repeat, no silence', () => {
+  it('retries on a duplicate instead of returning null (no silent turn)', async () => {
+    let i = 0; const seq = ['Repeated line', 'Repeated line', 'A brand new line'];
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ content: [{ type: 'text', text: seq[i++] }] }) }));
+    AIPep.setKey('sk-dup'); AIPep.setEnabled(true);
+    expect((await AIPep.generateLine(baseCtx())).plain).toBe('Repeated line');   // primes `seen`
+    expect((await AIPep.generateLine(baseCtx())).plain).toBe('A brand new line'); // dup -> retry -> fresh
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('requests max_tokens 150 (longer lines do not truncate)', async () => {
+    stubFetch('a line');
+    AIPep.setKey('sk-mt'); AIPep.setEnabled(true);
+    await AIPep.generateLine(baseCtx());
+    expect(JSON.parse(calls[0].opts.body).max_tokens).toBe(150);
+  });
+});
+
+describe('rivalry + last-turn prompt threading', () => {
+  const rivalry = { totalGames: 9, wins: { Dan: 3, Amber: 5 }, ties: 1, leader: 'Amber', streak: { name: 'Amber', length: 2 },
+    lastWinner: 'Amber', avg: { Dan: 95, Amber: 162 }, bestGame: { name: 'Amber', score: 286 }, closestMargin: 4, biggestBlowout: { winner: 'Amber', margin: 120 } };
+
+  it('includes the rivalry line when ctx.rivalry is present', () => {
+    const msg = buildUserMessage({ ...baseCtx(), rivalry });
+    expect(msg).toMatch(/RIVALRY HISTORY/);
+    expect(msg).toMatch(/Career: Dan 3-5 Amber \(1 tie\) over 9 games/);
+    expect(msg).toMatch(/Amber has won the last 2/);
+    expect(msg).toMatch(/Career averages: Dan 95, Amber 162/);
+    expect(msg).toMatch(/Record game: Amber 286/);
+  });
+
+  it('includes a last-turn note when ctx.scorerLastTurn is set', () => {
+    expect(buildUserMessage({ ...baseCtx(), scorerLastTurn: true })).toMatch(/Dans LAST TURN, final box/);
+    expect(buildUserMessage({ ...baseCtx(), opponentLastTurn: true })).toMatch(/Amber is down to their LAST box/);
   });
 });

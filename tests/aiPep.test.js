@@ -2,7 +2,7 @@
 // AI commentary line generation: request shaping (roast both, rich context), tag-aware parsing,
 // escalation mapping, dedup, abort, and the no-key path — fetch stubbed.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { AIPep, parseLine, stripTags, savageryLevel, buildUserMessage } from '../src/ui/aiPep.js';
+import { AIPep, parseLine, stripTags, savageryLevel, buildUserMessage, ANGLES } from '../src/ui/aiPep.js';
 
 let calls;
 function stubFetch(textOut) {
@@ -91,5 +91,29 @@ describe('generateLine', () => {
     AIPep.setKey('sk-ant-k2'); AIPep.setEnabled(true);
     const ac = new AbortController(); ac.abort();
     expect(await AIPep.generateLine(baseCtx(), { signal: ac.signal })).toBeNull();
+  });
+});
+
+describe('spontaneity: rotating angle + self-memory', () => {
+  it('injects a delivery persona each call and never repeats it back-to-back', async () => {
+    let i = 0; calls = [];
+    globalThis.fetch = vi.fn(async (url, opts) => { calls.push({ url, opts }); return { ok: true, json: async () => ({ content: [{ type: 'text', text: `unique ${++i}` }] }) }; });
+    AIPep.setKey('sk-angle'); AIPep.setEnabled(true);
+    await AIPep.generateLine(baseCtx());
+    await AIPep.generateLine(baseCtx());
+    const angleOf = (call) => ANGLES.find(a => JSON.parse(call.opts.body).messages[0].content.includes(a));
+    const a0 = angleOf(calls[0]), a1 = angleOf(calls[1]);
+    expect(a0).toBeTruthy();
+    expect(a1).toBeTruthy();
+    expect(a0).not.toBe(a1);
+  });
+
+  it('threads its recent lines into the next prompt', async () => {
+    let i = 0; calls = [];
+    globalThis.fetch = vi.fn(async (url, opts) => { calls.push({ url, opts }); return { ok: true, json: async () => ({ content: [{ type: 'text', text: i++ === 0 ? 'First witty line here.' : 'a different second line' }] }) }; });
+    AIPep.setKey('sk-recent'); AIPep.setEnabled(true);
+    expect((await AIPep.generateLine(baseCtx())).plain).toBe('First witty line here.');
+    await AIPep.generateLine(baseCtx());
+    expect(JSON.parse(calls[1].opts.body).messages[0].content).toContain('First witty line here.');
   });
 });

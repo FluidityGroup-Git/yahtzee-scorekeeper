@@ -49,6 +49,33 @@ export function buildContext({ entries, scorerSeat, names, lastCategory, lastVal
   else if (leader === s) needToWin = `${names[s]} is up ${margin} with ${boxesLeft(o)} boxes left for ${names[o]} to answer.`;
   else needToWin = `${names[s]} needs ${margin} back across their last ${boxesLeft(s)} boxes.`;
 
+  // ---- streak / trend detection (simple run analysis from the log) ----
+  const baseOf = i => entries.filter(e => e.playerId === i && e.category !== 'yahtzeeBonus').sort((a, b) => a.orderIndex - b.orderIndex);
+  const trailingScratches = arr => { let n = 0; for (let i = arr.length - 1; i >= 0; i--) { if (arr[i].value === 0) n++; else break; } return n; };
+  const sBase = baseOf(s), oBase = baseOf(o);
+  const scorerScratchStreak = trailingScratches(sBase);
+  const oppScratchStreak = trailingScratches(oBase);
+  const lastThree = sBase.slice(-3);
+  const coldStreak = lastThree.length === 3 && lastThree.every(e => e.value <= 6);
+  const upperZeros = UPPER_KEYS.filter(k => v[s][k] === 0).length;
+  // How many of the most recent scores the current leader has held without the lead changing hands.
+  const ord = [...entries].sort((a, b) => a.orderIndex - b.orderIndex);
+  let lastFlip = -1, prevSgn = 0;
+  for (let i = 0; i < ord.length; i++) {
+    const pre = ord.slice(0, i + 1);
+    const sgn = Math.sign(computeTotals(valuesFor(pre, 0)).grand - computeTotals(valuesFor(pre, 1)).grand);
+    if (sgn !== 0) { if (prevSgn !== 0 && sgn !== prevSgn) lastFlip = i; prevSgn = sgn; }
+  }
+  const leaderRun = ord.length ? (ord.length - 1 - lastFlip) : 0;
+
+  const trends = [];
+  if (scorerScratchStreak >= 2) trends.push(`${names[s]} has scratched ${scorerScratchStreak} in a row`);
+  if (oppScratchStreak >= 2) trends.push(`${names[o]} is on a ${oppScratchStreak}-scratch skid`);
+  if (coldStreak) trends.push(`${names[s]} has gone ice cold`);
+  if (upperZeros >= 2) trends.push(`${names[s]} keeps torching upper boxes`);
+  else if (v[s].threeKind === 0 && v[s].fourKind === 0) trends.push(`${names[s]} whiffed both of-a-kinds`);
+  if (leader !== null && leaderRun >= 6) trends.push(`${names[leader]} has led for ${leaderRun} straight scores`);
+
   return {
     scorer: names[s], scorerSeat: s, opponent: names[o],
     category: META[lastCategory]?.name || lastCategory, categoryKey: lastCategory, value: lastValue,
@@ -61,6 +88,6 @@ export function buildContext({ entries, scorerSeat, names, lastCategory, lastVal
     scorerBonusDist: bonusDist(s), scorerBonusSecured: bonusDist(s) === 0 && t[s].upper > 0,
     opponentBonusDist: bonusDist(o), opponentBonusSecured: bonusDist(o) === 0 && t[o].upper > 0,
     scorerBoxesLeft: boxesLeft(s), opponentBoxesLeft: boxesLeft(o),
-    needToWin, jabs, level, profanity,
+    needToWin, jabs, trends, scorerScratchStreak, level, profanity,
   };
 }

@@ -12,17 +12,44 @@ const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 
 const SYSTEM = [
   'You are the live, ringside color commentator for a fast, friendly two-player Yahtzee game between Dan and Amber.',
-  'React to the score you are told about with ONE short spoken sentence (at most two for a huge moment).',
-  'You roast BOTH players — whoever the moment calls for, and you may take a side. Mostly comedic roast, with the occasional sincere or witty-inspiring beat.',
-  'Be specific: use the real names, the running totals, what someone still needs, a weak upper number, an untouched Chance, a brutal scratch, or a comeback — pick what FITS this moment, not all at once.',
+  'React to the score you are told about. You roast BOTH players — whoever the moment calls for, and you may take a side. Mostly comedic roast, with the occasional sincere or witty beat.',
+  'Each line you will be assigned a random DELIVERY PERSONA and a SENTENCE SHAPE — commit to them fully and lean in hard; they are your main source of variety, so do NOT fall back into a recognizable house voice.',
+  'Use the facts when they are funny — names, totals, what someone needs, a weak number, a cold streak — but you may also just react to the vibe or fixate on one absurd detail. Do not recite stats dutifully.',
+  'Vary the length a lot: sometimes three words, sometimes a full sentence. Avoid your own clichés and the structures of the recent lines you are shown.',
   'You may include at most one or two ElevenLabs v3 performance tags in square brackets, e.g. [dryly], [gleeful], [low], [laughs], to color delivery.',
-  'SAVAGERY LADDER (you will be told the level, 1 to 5): L1 cheeky and light. L2 sharper sarcasm. L3 gallows humor, mock-villain swagger. L4 properly savage. L5 peak comedic cruelty, full theatrical villainy.',
+  'SAVAGERY LADDER (you will be told the level, 1 to 5): L1 cheeky and light. L2 sharper sarcasm. L3 gallows humor. L4 properly savage. L5 peak comedic cruelty.',
   'HARD RULES at EVERY level: no slurs; nothing about protected characteristics (race, gender, religion, orientation, disability); no jabs at appearance, weight, or real insecurities; no sexual content. Roast their Yahtzee play and competence only — affection underneath.',
-  'No emoji. No stage directions in parentheses. No quotation marks around the line.',
+  'Output ONE spoken line (occasionally two short ones for a big moment). No emoji, no stage directions in parentheses, no quotation marks around the line.',
 ].join(' ');
+
+// Rotating comedic angle + sentence shape — the biggest lever for variety. One of each is picked
+// per call and put in the user message; the angle never repeats back-to-back.
+export const ANGLES = [
+  'a deadpan statistician', 'a breathless sports play-by-play announcer', 'a mock-Shakespearean bard',
+  'a grim true-crime narrator', 'a quietly disappointed parent', 'a hushed nature-documentary narrator',
+  'an unhinged hype-beast', 'a world-weary noir detective', 'a manic infomercial host',
+  'a passive-aggressive coworker', 'a paranoid conspiracy theorist', 'a theatrical fortune teller',
+  'a snobbish wine critic', 'an exhausted air-traffic controller',
+];
+export const SHAPES = [
+  'a one-word verdict', 'a fabricated statistic', 'a backhanded compliment', 'a mock threat',
+  'a rhetorical question', 'a fake news headline', 'a single brutal metaphor', 'an overheard aside',
+];
 
 let enabled = false;
 const seen = new Set();
+const recent = [];        // last few generated lines (self-memory, threaded into the prompt)
+let lastAngle = null;
+
+export function pickDelivery() {
+  let angle = ANGLES[Math.floor(Math.random() * ANGLES.length)];
+  if (angle === lastAngle && ANGLES.length > 1) {
+    const others = ANGLES.filter(a => a !== lastAngle);
+    angle = others[Math.floor(Math.random() * others.length)];
+  }
+  lastAngle = angle;
+  return { angle, shape: SHAPES[Math.floor(Math.random() * SHAPES.length)] };
+}
 
 function getKey() { try { return localStorage.getItem(KEY_STORAGE) || ''; } catch { return ''; } }
 function putKey(k) { try { if (k) localStorage.setItem(KEY_STORAGE, k); else localStorage.removeItem(KEY_STORAGE); } catch { /* ignore */ } }
@@ -46,13 +73,17 @@ export function savageryLevel(progress, cap = 5) {
   return Math.min(lvl, c);
 }
 
-export function buildUserMessage(c) {
+export function buildUserMessage(c, { angle, shape, recent: recentLines } = {}) {
   const lvl = c.level || 1;
   const L = [`Savagery level ${lvl} of 5.`, c.profanity ? 'Mild profanity allowed for comedic punch.' : 'Keep it clean — no profanity.'];
+  if (angle || shape) L.push(`Deliver THIS line as ${angle || 'yourself'}${shape ? `, in the form of ${shape}` : ''}.`);
+  const recentTail = () => { if (recentLines && recentLines.length) L.push(`Recent lines you've already said (do NOT reuse their structure or jokes; you MAY call back to one if it lands): ${recentLines.map(r => `"${r}"`).join(' / ')}.`); };
+
   if (c.gameOver) {
     if (c.tie) L.push(`GAME OVER — a TIE at ${c.winScore}. Roast both Dan and Amber.`);
     else L.push(`GAME OVER. ${c.winner} beat ${c.loser} ${c.winScore} to ${c.loseScore}.`);
     L.push('Give the closing line: hype the winner and roast the loser (or roast both on a tie).');
+    recentTail();
     return L.join(' ');
   }
   L.push(`${c.scorer} just scored ${c.category}${c.value != null ? ` for ${c.value}` : ''}.`);
@@ -66,12 +97,14 @@ export function buildUserMessage(c) {
   L.push(`Upper bonus: ${c.scorer} ${c.scorerBonusSecured ? 'has the +35' : `needs ${c.scorerBonusDist} more`}; ${c.opponent} ${c.opponentBonusSecured ? 'has the +35' : `needs ${c.opponentBonusDist} more`}.`);
   L.push(`Boxes left: ${c.scorer} ${c.scorerBoxesLeft}, ${c.opponent} ${c.opponentBoxesLeft}.`);
   if (c.needToWin) L.push(c.needToWin);
+  if (c.trends && c.trends.length) L.push('Trends: ' + c.trends.join('; ') + '.');
   if (c.jabs && c.jabs.length) L.push('Jab fodder: ' + c.jabs.join('; ') + '.');
-  L.push('Now give one fresh line that fits this exact moment.');
+  recentTail();
+  L.push('Now give one fresh line — commit to the persona and shape above, and surprise me.');
   return L.join(' ');
 }
 
-async function callAPI(key, ctx, timeoutMs = 8000, signal) {
+async function callAPI(key, userMessage, timeoutMs = 8000, signal) {
   const ctrl = new AbortController();
   const onAbort = () => ctrl.abort();
   if (signal) { if (signal.aborted) ctrl.abort(); else signal.addEventListener('abort', onAbort, { once: true }); }
@@ -87,7 +120,8 @@ async function callAPI(key, ctx, timeoutMs = 8000, signal) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({ model: MODEL, max_tokens: 110, temperature: 1, system: SYSTEM, messages: [{ role: 'user', content: buildUserMessage(ctx) }] }),
+      // temperature is capped at 1.0 by the API (1.1 -> 400); keep it at the max for variety.
+      body: JSON.stringify({ model: MODEL, max_tokens: 110, temperature: 1, system: SYSTEM, messages: [{ role: 'user', content: userMessage }] }),
     });
   } finally { clearTimeout(timer); if (signal) signal.removeEventListener('abort', onAbort); }
   if (!res.ok) {
@@ -113,9 +147,12 @@ export const AIPep = {
   async generateLine(ctx, { signal } = {}) {
     if (!this.ready()) return null;
     try {
-      const { tagged, plain } = parseLine(await callAPI(getKey(), ctx, 8000, signal));
+      const { angle, shape } = pickDelivery();
+      const userMessage = buildUserMessage(ctx, { angle, shape, recent: recent.slice() });
+      const { tagged, plain } = parseLine(await callAPI(getKey(), userMessage, 8000, signal));
       if (!plain || seen.has(plain)) return null;   // keep lines unique within the session
       seen.add(plain);
+      recent.push(plain); if (recent.length > 4) recent.shift();   // self-memory for callbacks / anti-repetition
       return { tagged, plain };
     } catch { return null; }
   },
@@ -130,7 +167,9 @@ export const AIPep = {
       scorerBonusSecured: true, scorerBonusDist: 0, opponentBonusSecured: false, opponentBonusDist: 9,
       scorerBoxesLeft: 4, opponentBoxesLeft: 5, jabs: ['Dan scratched Aces & Twos'],
     };
-    try { return { ok: true, text: parseLine(await callAPI(k, sample, 12000)).plain }; }
-    catch (e) { return { ok: false, error: String(e?.message || e) }; }
+    try {
+      const { angle, shape } = pickDelivery();
+      return { ok: true, text: parseLine(await callAPI(k, buildUserMessage(sample, { angle, shape }), 12000)).plain };
+    } catch (e) { return { ok: false, error: String(e?.message || e) }; }
   },
 };

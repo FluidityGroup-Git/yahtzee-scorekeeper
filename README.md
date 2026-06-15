@@ -58,6 +58,12 @@ iOS Safari → Share → *Add to Home Screen* (works, with iOS's usual PWA quirk
       {scorerTotal} {opponentTotal} {leader} {margin}`. Custom lines take **priority** over the AI
       (and work with no Claude key); the most-specific rule wins, multiple lines pick at random avoiding
       repeats, and anything with no match falls through to the AI.
+- [x] **Spontaneity pass** — each AI line is assigned a random **delivery persona** (deadpan statistician,
+      noir detective, nature-doc narrator, …) + **sentence shape** (one-word verdict, fake headline, brutal
+      metaphor, …), never repeating the persona back-to-back; the model is shown its **recent lines** to
+      avoid repeating its own tics; **streak/trend flags** (scratch runs, cold streaks, a long-held lead)
+      feed the prompt; and the leash is looser (react to the vibe, vary length). `temperature` stays 1.0
+      (the API max).
 - [ ] Phase 3 — Dexie persistence (autosave + resume, order log). **Not yet — refresh still resets.**
 - [ ] Phase 4 — New game / names, game-over finalize + save record.
 - [ ] Phase 5 — History screen.

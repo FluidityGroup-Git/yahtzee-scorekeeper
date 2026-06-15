@@ -46,6 +46,15 @@ describe('situational fields + jab fodder', () => {
     expect(c.justScratched).toBe(false);
   });
 
+  it('detects a 3-scratch streak and clears it after a real score', () => {
+    const a = buildContext({ entries: [E(0, 'aces', 0), E(0, 'twos', 0), E(0, 'threes', 0)], scorerSeat: 0, names: NAMES, lastCategory: 'threes', lastValue: 0, leadBefore: null });
+    expect(a.scorerScratchStreak).toBe(3);
+    expect(a.trends.join(' | ')).toMatch(/Dan has scratched 3 in a row/);
+
+    const b = buildContext({ entries: [E(0, 'fours', 0), E(0, 'fives', 0), E(0, 'sixes', 18)], scorerSeat: 0, names: NAMES, lastCategory: 'sixes', lastValue: 18, leadBefore: null });
+    expect(b.scorerScratchStreak).toBe(0);
+  });
+
   it('marks a fresh scratch and a secured bonus', () => {
     const entries = [
       E(1, 'aces', 3), E(1, 'twos', 6), E(1, 'threes', 9), E(1, 'fours', 12), E(1, 'fives', 15), E(1, 'sixes', 18), // upper 63 -> secured

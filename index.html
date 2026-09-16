@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b141c">
+<style>html[data-booting] body{visibility:hidden}html[data-booting]{background:#0b141c}</style>
+<title>Yahtzee — Clubhouse</title>
+<script>
+document.documentElement.dataset.booting = '';
+try { document.documentElement.dataset.theme = localStorage.getItem('yz_theme') === 'light' ? 'light' : 'dark'; }
+catch { document.documentElement.dataset.theme = 'dark'; }
+</script>
+  <script type="module" crossorigin src="/yahtzee-scorekeeper/assets/index-BnIC_nso.js"></script>
+  <link rel="stylesheet" crossorigin href="/yahtzee-scorekeeper/assets/index-Bid4DEm_.css">
+<link rel="manifest" href="/yahtzee-scorekeeper/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/yahtzee-scorekeeper/registerSW.js"></script></head>
+<body>
+<div class="device" id="device">
+  <div class="screen-tint" aria-hidden="true"></div>
+  <div class="stage">
+    <header>
+      <div class="brand">
+        <div class="word">
+          <span class="dice"><span class="d"><b></b></span><span class="d"><b></b></span></span>
+          <div><span class="logo">yahtzee<span>.</span></span><span class="brand-note">CLUBHOUSE</span></div>
+        </div>
+        <button class="hbtn appearance" id="themeBtn" aria-label="Switch to light theme">Light mode</button>
+        <div class="hbtns">
+          <button class="hbtn" id="soundBtn" title="Sound" aria-label="Toggle sound" aria-pressed="true">Sound</button>
+          <button class="hbtn" id="pepBtn" title="Commentary voice: on" aria-label="Toggle commentary" aria-pressed="true">Voice</button>
+          <button class="hbtn" id="setBtn" title="Settings" aria-label="Settings">Settings</button>
+          <button class="hbtn" id="statsBtn">Stats</button>
+          <button class="hbtn" id="dataBtn">Data</button>
+          <button class="hbtn" id="newBtn">New</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="table-intro"><div><div class="intro-kicker">A LITTLE LUCK. A LITTLE STRATEGY.</div><h1>Make it count.</h1></div><span class="session-tag">Manual game</span></div>
+
+    <div class="hud">
+      <div class="ppanel" data-p="0">
+        <div class="pcap"><span class="pflag"></span><input class="pname" data-p="0" value="Dan" maxlength="12" aria-label="Player 1 name"></div>
+        <div class="ptotal" id="tot0">0</div>
+        <div class="pmini" id="pmini0">0 up · 63 to +35</div>
+        <div class="pmeta" id="meta0">0 / 13 boxes</div>
+      </div>
+
+      <div class="center">
+        <div class="round" id="roundLabel">Round 1 of 13</div>
+        <div class="leader" id="leaderLabel">Tied</div>
+        <div class="gapbar"><div class="gapfill" id="gapFill"></div></div>
+        <div class="savage" id="savageLabel" data-lvl="1">L1</div>
+      </div>
+
+      <div class="ppanel" data-p="1">
+        <div class="pcap"><span class="pflag"></span><input class="pname" data-p="1" value="Amber" maxlength="12" aria-label="Player 2 name"></div>
+        <div class="ptotal" id="tot1">0</div>
+        <div class="pmini" id="pmini1">0 up · 63 to +35</div>
+        <div class="pmeta" id="meta1">0 / 13 boxes</div>
+      </div>
+    </div>
+
+    <div class="statusline-wrap">
+      <div class="statusline turn p0" id="statusLine">🎲 <b>Dan</b>'s turn — roll, then tap a box to score.</div>
+      <div class="caption" id="caption" aria-live="polite"></div>
+    </div>
+
+    <main class="board" aria-label="Game scorecard">
+      <section class="block" aria-label="Upper section">
+        <div class="blockhead">Upper section</div>
+        <div class="score-columns"><span>Category</span><span data-score-player="0"></span><span data-score-player="1"></span></div>
+        <div class="grid" id="upperGrid"></div>
+        <div class="grid" id="upperCalc"></div>
+      </section>
+      <section class="block" aria-label="Lower section">
+        <div class="blockhead">Lower section</div>
+        <div class="score-columns"><span>Category</span><span data-score-player="0"></span><span data-score-player="1"></span></div>
+        <div class="grid" id="lowerGrid"></div>
+        <div class="grid" id="lowerCalc"></div>
+      </section>
+    </main>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="scrim" id="scrim"><div class="entry" id="entry"></div></div>
+<div class="scrim setup" id="setupScrim"><div class="setupcard" id="setupCard"></div></div>
+<div id="celebration-layer" class="celebration-layer" aria-hidden="true"><canvas id="celebration-canvas"></canvas></div>
+<div id="mascot-stage" class="mascot-stage" aria-hidden="true"></div>
+<div class="statsscreen" id="statsScreen">
+  <div class="statshead">
+    <div class="statstitle">📊 Stats</div>
+    <button class="hbtn" id="statsBack">← Back to game</button>
+  </div>
+  <div class="statsbody" id="statsBody"></div>
+</div>
+
+</body>
+</html>

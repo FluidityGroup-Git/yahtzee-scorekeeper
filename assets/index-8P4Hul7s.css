@@ -1,0 +1,1 @@
+html[data-native] body{box-sizing:border-box;padding:0}html[data-native]{--safe-area-inset-top: 0px;--safe-area-inset-bottom: 0px;--safe-area-inset-left: 0px;--safe-area-inset-right: 0px}html[data-native] #coreNotice{bottom:calc(12px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))}
